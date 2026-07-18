@@ -18,9 +18,11 @@ MUSE 2 取樣率 = 256 Hz，所以「1 秒」= 256 個樣本。
 
 輸出
 ----
-每個通道各存成一個 CSV 到 fft/ 資料夾，例如輸入 csv/1.csv 會產生：
-    fft/1_TP9.csv, fft/1_AF7.csv, fft/1_AF8.csv, fft/1_TP10.csv
-每個檔的一列 = 一秒；欄位為 second, 1, 2, 3, ... , 128（Hz 對應的能量 µV²）。
+每個通道各有一個子資料夾（TP9/ AF7/ AF8/ TP10/），檔名 = 輸入檔的編號。
+例如輸入 csv/1.csv 會產生：
+    fft/TP9/1.csv, fft/AF7/1.csv, fft/AF8/1.csv, fft/TP10/1.csv
+每個檔的一列 = 一秒；欄位為 second, 1HZ, 2HZ, ... , 128HZ（各 Hz 的能量 µV²）。
+每個通道資料夾內會保留一個 .gitkeep 佔位檔（實際 .csv 由 .gitignore 忽略、不上傳）。
 
 用法
 ----
@@ -112,7 +114,10 @@ def main():
 
     for c, ch in enumerate(CHANNELS):
         energies = per_second_energy(data[:, c], fs)   # (秒數, 129)
-        out_path = os.path.join(out_dir, f"{stem}_{ch}.csv")
+        ch_dir = os.path.join(out_dir, ch)             # fft/<通道>/
+        os.makedirs(ch_dir, exist_ok=True)
+        open(os.path.join(ch_dir, ".gitkeep"), "a").close()   # 保留資料夾結構
+        out_path = os.path.join(ch_dir, f"{stem}.csv")
         with open(out_path, "w", newline="") as f:
             writer = csv.writer(f)
             # 只輸出 1..128 Hz（跳過 0 Hz 直流），欄名為 1HZ, 2HZ, ... , 128HZ
