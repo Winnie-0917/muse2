@@ -1,0 +1,26 @@
+# Python 虛擬環境
+venv/
+.venv/
+env/
+
+# Python 快取 / 編譯檔
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 錄製的原始 EEG 資料都放在 csv/：
+# 只保留空資料夾（.gitkeep），資料夾內的實際錄製檔不上傳
+csv/*
+!csv/.gitkeep
+eeg_*.csv
+*.csv
+
+# 作業系統 / 編輯器
+.DS_Store
+.idea/
+.vscode/
+*.swp
