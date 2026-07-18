@@ -2,18 +2,21 @@
 """
 把 MUSE 2 的原始 EEG 直接（BLE）錄成 CSV 檔。
 
-每一列 = 一個時間樣本：timestamp, TP9, AF7, AF8, TP10, AUX（單位 µV）。
-取樣率 256 Hz。
+每一列 = 一個時間樣本：timestamp, TP9, AF7, AF8, TP10（單位 µV）。
+不含 Right AUX（MUSE 2 無外接 AUX 電極，數值恆為 0）。取樣率 256 Hz。
+
+檔案一律存到 csv/ 資料夾，並以流水號命名：1.csv, 2.csv, 3.csv ...
 
 用法:
-    ./venv/bin/python record_csv.py                          # 自動掃描，錄到 eeg_<時間>.csv
-    ./venv/bin/python record_csv.py --address 00:55:DA:B0:XX:XX --seconds 60 --out my.csv
+    ./venv/bin/python record_csv.py                          # 自動掃描，錄到 csv/<下一個編號>.csv
+    ./venv/bin/python record_csv.py --address 00:55:DA:B0:XX:XX --seconds 60
 
 按 Ctrl+C 可提前結束並存檔。
 """
 import argparse
 import csv
 import os
+import re
 import sys
 import time
 
@@ -23,7 +26,8 @@ CSV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv")
 from muselsl import list_muses, backends
 from muselsl.muse import Muse
 
-CHANNELS = ["TP9", "AF7", "AF8", "TP10", "AUX"]
+# 只錄 4 個真實 EEG 通道，不含 AUX（AUX 是 data 的索引 4）
+CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
 
 
 class Recorder:
@@ -32,12 +36,25 @@ class Recorder:
         self.count = 0
 
     def on_eeg(self, data, timestamps):
-        # data: (5, 12)；逐一時間樣本寫入
+        # data: (5, 12)；逐一時間樣本寫入，只取前 4 個通道（跳過 AUX）
         for i in range(data.shape[1]):
             self.writer.writerow(
-                [f"{timestamps[i]:.6f}"] + [f"{data[ch, i]:.3f}" for ch in range(5)]
+                [f"{timestamps[i]:.6f}"]
+                + [f"{data[ch, i]:.3f}" for ch in range(len(CHANNELS))]
             )
             self.count += 1
+
+
+def next_csv_path(csv_dir):
+    """在 csv/ 找出下一個未使用的流水號檔名：1.csv, 2.csv, 3.csv ..."""
+    os.makedirs(csv_dir, exist_ok=True)
+    used = [
+        int(m.group(1))
+        for f in os.listdir(csv_dir)
+        if (m := re.match(r"^(\d+)\.csv$", f))
+    ]
+    n = (max(used) + 1) if used else 1
+    return os.path.join(csv_dir, f"{n}.csv")
 
 
 def resolve_address(args):
@@ -56,16 +73,12 @@ def main():
     ap.add_argument("--address", help="MUSE 的 BLE address（省略則自動掃描）")
     ap.add_argument("--name", help="裝置名稱（可選）")
     ap.add_argument("--seconds", type=float, default=0, help="錄製秒數（0=不限，直到 Ctrl+C）")
-    ap.add_argument("--out", help="輸出 CSV 路徑（預設 csv/eeg_<時間>.csv）")
     ap.add_argument("--retries", type=int, default=3, help="連線重試次數")
     args = ap.parse_args()
 
     address, name = resolve_address(args)
-    if args.out:
-        out_path = args.out
-    else:
-        os.makedirs(CSV_DIR, exist_ok=True)
-        out_path = os.path.join(CSV_DIR, time.strftime("eeg_%Y%m%d_%H%M%S.csv"))
+    # 一律存到 csv/，用流水號命名（1.csv, 2.csv, ...）
+    out_path = next_csv_path(CSV_DIR)
 
     f = open(out_path, "w", newline="")
     writer = csv.writer(f)
