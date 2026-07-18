@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
-"""
-掃描附近的 MUSE 裝置（透過 BLE / bleak）。
 
-用法:
-    ./venv/bin/python list_devices.py
-    ./venv/bin/python list_devices.py --timeout 15
-
-找到後把顯示的 address（例如 00:55:DA:B0:xx:xx）複製到 monitor_raw.py / record_csv.py。
-戴上頭帶並開機（LED 閃爍表示待連線）後再執行本程式。
-"""
+# 掃描附近的 MUSE 裝置（透過 BLE / bleak）。
 import argparse
-
 from muselsl import list_muses
 
 
 def main():
     ap = argparse.ArgumentParser(description="掃描 MUSE 裝置")
     ap.add_argument("--timeout", type=int, default=10, help="掃描秒數（預設 10）")
-    args = ap.parse_args()
+    ap.parse_args()
 
     # backend='bleak' -> 使用 Linux 原生 BlueZ / D-Bus，不需要額外驅動
     muses = list_muses(backend="bleak")
