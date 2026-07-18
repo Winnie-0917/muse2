@@ -3,6 +3,3 @@
 muselsl        # MUSE streaming layer (pulls in pylsl)
 bleak          # Native Linux BLE backend (BlueZ / D-Bus), no dongle-specific drivers needed
 numpy          # 陣列運算 + monitor_raw 統計 + fft_energy.py 的每秒 FFT 分析
-
-# 選用（optional）：只有要用內建 GUI 波形檢視器 `muselsl view` 時才需要
-matplotlib     # LSL 圖形化波形（見 README「四、進階：LSL 串流」）
