@@ -140,5 +140,6 @@ $$
 | `record_csv.py`   | 直接 BLE 連線、把原始 EEG 錄成 CSV |
 | `fft_energy.py`   | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
 | `engagement.py`   | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均，輸出平滑專注度 |
+| `clean_csv.py`    | 刪除專案內所有 .csv（csv/ei/fft），保留資料夾與 .gitkeep（`--dry-run` 可預覽）|
 | `requirements.txt`| 相依套件 |
 | `venv/`           | Python 虛擬環境 |
