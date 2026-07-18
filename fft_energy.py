@@ -19,16 +19,16 @@ MUSE 2 取樣率 = 256 Hz，所以「1 秒」= 256 個樣本。
 輸出
 ----
 每個通道各有一個子資料夾（TP9/ AF7/ AF8/ TP10/），檔名 = 輸入檔的編號。
-例如輸入 csv/1.csv 會產生：
-    fft/TP9/1.csv, fft/AF7/1.csv, fft/AF8/1.csv, fft/TP10/1.csv
+例如輸入 Data/1.csv 會產生：
+    FFT/TP9/1.csv, FFT/AF7/1.csv, FFT/AF8/1.csv, FFT/TP10/1.csv
 每個檔的一列 = 一秒；欄位為 second, 1HZ, 2HZ, ... , 128HZ（各 Hz 的能量 µV²）。
 每個通道資料夾內會保留一個 .gitkeep 佔位檔（實際 .csv 由 .gitignore 忽略、不上傳）。
 
 用法
 ----
-    ./venv/bin/python fft_energy.py                  # 分析 csv/ 內最新（編號最大）的檔
-    ./venv/bin/python fft_energy.py csv/1.csv         # 指定輸入檔
-    ./venv/bin/python fft_energy.py csv/1.csv --fs 256 --out fft
+    ./venv/bin/python fft_energy.py                  # 分析 Data/ 內最新（編號最大）的檔
+    ./venv/bin/python fft_energy.py Data/1.csv         # 指定輸入檔
+    ./venv/bin/python fft_energy.py Data/1.csv --fs 256 --out FFT
 """
 import argparse
 import csv
@@ -39,12 +39,12 @@ import sys
 import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_DIR = os.path.join(BASE_DIR, "csv")
+CSV_DIR = os.path.join(BASE_DIR, "Data")
 CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
 
 
 def latest_csv(csv_dir):
-    """回傳 csv/ 內編號最大的 <n>.csv；找不到就結束程式。"""
+    """回傳 Data/ 內編號最大的 <n>.csv；找不到就結束程式。"""
     used = [
         (int(m.group(1)), f)
         for f in os.listdir(csv_dir)
@@ -92,9 +92,9 @@ def per_second_energy(signal, fs):
 
 def main():
     ap = argparse.ArgumentParser(description="對 MUSE 2 EEG 做每秒 FFT 能量分析（1..128 Hz）")
-    ap.add_argument("input", nargs="?", help="輸入 CSV（省略則用 csv/ 內編號最大的檔）")
+    ap.add_argument("input", nargs="?", help="輸入 CSV（省略則用 Data/ 內編號最大的檔）")
     ap.add_argument("--fs", type=int, default=256, help="取樣率 Hz（MUSE 2 = 256）")
-    ap.add_argument("--out", default="fft", help="輸出資料夾（預設 fft/）")
+    ap.add_argument("--out", default="FFT", help="輸出資料夾（預設 FFT/）")
     args = ap.parse_args()
 
     in_path = args.input or latest_csv(CSV_DIR)
@@ -114,7 +114,7 @@ def main():
 
     for c, ch in enumerate(CHANNELS):
         energies = per_second_energy(data[:, c], fs)   # (秒數, 129)
-        ch_dir = os.path.join(out_dir, ch)             # fft/<通道>/
+        ch_dir = os.path.join(out_dir, ch)             # FFT/<通道>/
         os.makedirs(ch_dir, exist_ok=True)
         open(os.path.join(ch_dir, ".gitkeep"), "a").close()   # 保留資料夾結構
         out_path = os.path.join(ch_dir, f"{stem}.csv")

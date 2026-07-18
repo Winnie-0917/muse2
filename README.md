@@ -29,7 +29,7 @@ python3 -m venv venv
 ./venv/bin/python main.py --address 00:55:DA:B6:35:CA --seconds 60
 ```
 
-一條龍：**即時監控 + 錄製到 `csv/` → 停止後自動跑 FFT（`fft/`）→ 再跑 EI（`ei/`）**。
+一條龍：**即時監控 + 錄製到 `Data/` → 停止後自動跑 FFT（`FFT/`）→ 再跑 EI（`EI/`）**。
 `--seconds` 到時自動停，或隨時按 `Ctrl+C`。想看「穩定 EI」請至少錄 10 秒以上。
 其他：`--no-analyze`（只監控+錄製）、`--aux`（畫面顯示 AUX）、省略 `--address` 則自動掃描。
 
@@ -85,9 +85,9 @@ $$X[k] = \sum_{n=0}^{N-1} x[n] \cdot e^{-i \frac{2\pi kn}{N}}$$
 **TP9 / AF7 / AF8 / TP10** 四個通道各自在 1 Hz、2 Hz … 128 Hz 上包含多少能量。
 
 ```bash
-./venv/bin/python fft_energy.py               # 分析 csv/ 內編號最大的檔
-./venv/bin/python fft_energy.py csv/1.csv      # 指定輸入檔
-./venv/bin/python fft_energy.py csv/1.csv --fs 256 --out fft
+./venv/bin/python fft_energy.py               # 分析 Data/ 內編號最大的檔
+./venv/bin/python fft_energy.py Data/1.csv      # 指定輸入檔
+./venv/bin/python fft_energy.py Data/1.csv --fs 256 --out FFT
 ```
 
 原理：MUSE 2 取樣率 256 Hz，**1 秒 = 256 個樣本**；對 256 點做 FFT，頻率解析度剛好
@@ -112,9 +112,9 @@ $$
 ### 每秒 EI + 10 秒滑動平均（engagement.py）
 
 ```bash
-./venv/bin/python engagement.py                 # 分析 csv/ 內編號最大的檔
-./venv/bin/python engagement.py csv/1.csv        # 指定輸入檔
-./venv/bin/python engagement.py csv/1.csv --window 10
+./venv/bin/python engagement.py                 # 分析 Data/ 內編號最大的檔
+./venv/bin/python engagement.py Data/1.csv        # 指定輸入檔
+./venv/bin/python engagement.py Data/1.csv --window 10
 ```
 
 做法（三步驟）：
@@ -126,7 +126,7 @@ $$
    `mean(EI_1..EI_10)`；第 11 秒進來自動踢掉最舊的第 1 秒 → 輸出 `mean(EI_2..EI_11)`；
    依此類推。每過 1 秒給一個「以過去 10 秒為基準」的平滑專注度，方便對比使用者當下的操作行為。
 
-輸出：終端機印出每秒 EI 與穩定分數，並存到 `ei/<編號>.csv`
+輸出：終端機印出每秒 EI 與穩定分數，並存到 `EI/<編號>.csv`
 （欄位 `second, EI, EI_smooth10`；此檔已被 `.gitignore` 忽略、不上傳）。
 
 > 頻帶邊界：θ 4–8、α 8–12、β 13–30 Hz，以 1 Hz 整數格計算；重疊的 8 Hz 併入 α、13 Hz 併入 β，避免重複計算。
@@ -142,6 +142,6 @@ $$
 | `record_csv.py`   | 直接 BLE 連線、把原始 EEG 錄成 CSV |
 | `fft_energy.py`   | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
 | `engagement.py`   | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均，輸出平滑專注度 |
-| `clean_csv.py`    | 刪除專案內所有 .csv（csv/ei/fft），保留資料夾與 .gitkeep（`--dry-run` 可預覽）|
+| `clean_csv.py`    | 刪除專案內所有 .csv（Data、FFT、EI），保留資料夾與 .gitkeep（`--dry-run` 可預覽）|
 | `requirements.txt`| 相依套件 |
 | `venv/`           | Python 虛擬環境 |

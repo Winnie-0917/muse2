@@ -6,9 +6,9 @@
 
   步驟 1（同時進行）：直接 BLE 連線 MUSE 2，
       - 終端機即時顯示原始 EEG（4 通道波形 / RMS / 訊號品質 / 取樣率）
-      - 同一份資料逐一樣本寫入 csv/<編號>.csv
-  步驟 2：停止後自動對該檔跑 fft_energy.py（每秒 FFT → fft/<通道>/<編號>.csv）
-  步驟 3：再跑 engagement.py（每秒 EI + 10 秒滑動平均 → ei/<編號>.csv）
+      - 同一份資料逐一樣本寫入 Data/<編號>.csv
+  步驟 2：停止後自動對該檔跑 fft_energy.py（每秒 FFT → FFT/<通道>/<編號>.csv）
+  步驟 3：再跑 engagement.py（每秒 EI + 10 秒滑動平均 → EI/<編號>.csv）
 
 停止錄製的方式：--seconds 到時自動停，或隨時按 Ctrl+C。
 
@@ -73,7 +73,7 @@ def resolve_address(args):
 
 
 def run_analysis(csv_path):
-    """依序執行 FFT 與 EI 分析（沿用既有腳本，輸出到 fft/ 與 ei/）。"""
+    """依序執行 FFT 與 EI 分析（沿用既有腳本，輸出到 FFT/ 與 EI/）。"""
     py = sys.executable  # 目前的 venv python
     # 先 flush 再叫子程序，確保標題印在子程序輸出「之前」（輸出被導向檔案時尤其重要）
     print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT（fft_energy.py）==={RESET}", flush=True)
@@ -99,7 +99,7 @@ def main():
     show_idx = list(range(5)) if args.aux else [0, 1, 2, 3]
     address, name = resolve_address(args)
 
-    # 準備輸出 CSV：csv/<下一個未使用編號>.csv
+    # 準備輸出 CSV：Data/<下一個未使用編號>.csv
     out_path = next_csv_path(CSV_DIR)
     f = open(out_path, "w", newline="")
     writer = csv.writer(f)
@@ -153,7 +153,7 @@ def main():
         return
 
     run_analysis(out_path)
-    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → FFT（fft/）→ EI（ei/）")
+    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → FFT（FFT/）→ EI（EI/）")
     if secs < 10:
         print(f"{DIM}提醒：此段只有約 {secs:.0f} 秒，未滿 10 秒故無「穩定 EI」；"
               f"想看平滑專注度請錄 10 秒以上。{RESET}")

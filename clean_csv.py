@@ -3,9 +3,9 @@
 刪除本專案內所有 CSV 檔（錄製的原始資料、FFT 輸出、EI 輸出）。
 
 會刪除的位置：專案根目錄底下所有 *.csv
-  - csv/*.csv        （record_csv.py / main.py 錄下的原始 EEG）
-  - ei/*.csv         （engagement.py 的 EI 輸出）
-  - fft/<通道>/*.csv （fft_energy.py 的每秒 FFT 輸出）
+  - Data/*.csv        （record_csv.py / main.py 錄下的原始 EEG）
+  - EI/*.csv         （engagement.py 的 EI 輸出）
+  - FFT/<通道>/*.csv （fft_energy.py 的每秒 FFT 輸出）
   - 其他散落在專案內的 *.csv
 
 安全機制

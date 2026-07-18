@@ -12,10 +12,10 @@ __pycache__/
 build/
 dist/
 
-# 錄製的原始 EEG 資料都放在 csv/：
+# 錄製的原始 EEG 資料都放在 Data/：
 # 只保留空資料夾（.gitkeep），資料夾內的實際錄製檔不上傳
-csv/*
-!csv/.gitkeep
+Data/*
+!Data/.gitkeep
 eeg_*.csv
 *.csv
 

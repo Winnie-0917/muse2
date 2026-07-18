@@ -5,10 +5,10 @@
 每一列 = 一個時間樣本：timestamp, TP9, AF7, AF8, TP10（單位 µV）。
 不含 Right AUX（MUSE 2 無外接 AUX 電極，數值恆為 0）。取樣率 256 Hz。
 
-檔案一律存到 csv/ 資料夾，並以流水號命名：1.csv, 2.csv, 3.csv ...
+檔案一律存到 Data/ 資料夾，並以流水號命名：1.csv, 2.csv, 3.csv ...
 
 用法:
-    ./venv/bin/python record_csv.py                          # 自動掃描，錄到 csv/<下一個編號>.csv
+    ./venv/bin/python record_csv.py                          # 自動掃描，錄到 Data/<下一個編號>.csv
     ./venv/bin/python record_csv.py --address 00:55:DA:B0:XX:XX --seconds 60
 
 按 Ctrl+C 可提前結束並存檔。
@@ -20,8 +20,8 @@ import re
 import sys
 import time
 
-# 預設把錄製檔存到專案下的 csv/ 資料夾
-CSV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv")
+# 預設把錄製檔存到專案下的 Data/ 資料夾
+CSV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
 
 from muselsl import list_muses, backends
 from muselsl.muse import Muse
@@ -46,7 +46,7 @@ class Recorder:
 
 
 def next_csv_path(csv_dir):
-    """在 csv/ 找出下一個未使用的流水號檔名：1.csv, 2.csv, 3.csv ..."""
+    """在 Data/ 找出下一個未使用的流水號檔名：1.csv, 2.csv, 3.csv ..."""
     os.makedirs(csv_dir, exist_ok=True)
     used = [
         int(m.group(1))
@@ -77,7 +77,7 @@ def main():
     args = ap.parse_args()
 
     address, name = resolve_address(args)
-    # 一律存到 csv/，用流水號命名（1.csv, 2.csv, ...）
+    # 一律存到 Data/，用流水號命名（1.csv, 2.csv, ...）
     out_path = next_csv_path(CSV_DIR)
 
     f = open(out_path, "w", newline="")

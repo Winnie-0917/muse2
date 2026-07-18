@@ -28,9 +28,9 @@ NASA 專注度 / 投入度指數（Engagement Index, EI）分析。
 
 用法
 ----
-    ./venv/bin/python engagement.py                 # 分析 csv/ 內編號最大的檔
-    ./venv/bin/python engagement.py csv/1.csv        # 指定輸入檔
-    ./venv/bin/python engagement.py csv/1.csv --window 10 --fs 256
+    ./venv/bin/python engagement.py                 # 分析 Data/ 內編號最大的檔
+    ./venv/bin/python engagement.py Data/1.csv        # 指定輸入檔
+    ./venv/bin/python engagement.py Data/1.csv --window 10 --fs 256
 """
 import argparse
 import csv
@@ -69,10 +69,10 @@ def band_energy(energies, band):
 
 def main():
     ap = argparse.ArgumentParser(description="NASA 專注度指數（EI）每秒計算 + 10 秒滑動平均")
-    ap.add_argument("input", nargs="?", help="輸入 CSV（省略則用 csv/ 內編號最大的檔）")
+    ap.add_argument("input", nargs="?", help="輸入 CSV（省略則用 Data/ 內編號最大的檔）")
     ap.add_argument("--fs", type=int, default=256, help="取樣率 Hz（MUSE 2 = 256）")
     ap.add_argument("--window", type=int, default=10, help="滑動視窗秒數（預設 10）")
-    ap.add_argument("--out", help="輸出 CSV 路徑（預設 ei/<輸入編號>.csv）")
+    ap.add_argument("--out", help="輸出 CSV 路徑（預設 EI/<輸入編號>.csv）")
     args = ap.parse_args()
 
     in_path = args.input or latest_csv(CSV_DIR)
@@ -142,8 +142,8 @@ def main():
         if not np.all(np.isnan(ei)):
             print(f"（參考）每秒 EI 平均 = {np.nanmean(ei):.4f}")
 
-    # 存檔到 ei/<編號>.csv
-    out_dir = os.path.join(BASE_DIR, "ei")
+    # 存檔到 EI/<編號>.csv
+    out_dir = os.path.join(BASE_DIR, "EI")
     if args.out:
         out_path = args.out
     else:
