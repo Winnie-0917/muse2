@@ -71,9 +71,12 @@ def main():
         return
 
     if not args.yes:
-        ans = input(f"\n確定要刪除以上 {len(files)} 個檔案嗎？此動作無法復原。(y/N): ").strip().lower()
+        try:
+            ans = input(f"\n確定要刪除以上 {len(files)} 個檔案嗎？此動作無法復原。(y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = ""  # 沒有互動輸入（例如管線）或被中斷 -> 視為取消
         if ans not in ("y", "yes"):
-            print("已取消，未刪除任何檔案。")
+            print("\n已取消，未刪除任何檔案。（要免詢問刪除請加 -y）")
             return
 
     deleted, failed = 0, 0
