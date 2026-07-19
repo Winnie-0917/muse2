@@ -18,15 +18,17 @@
 
 用法
 ----
-    ./venv/bin/python clean_csv.py            # 列出並詢問確認後刪除
-    ./venv/bin/python clean_csv.py --dry-run  # 只預覽、不刪除
-    ./venv/bin/python clean_csv.py -y         # 不詢問，直接刪除（給腳本用）
+    python -m signal_monitor.data_utils.clean_csv            # 列出並詢問確認後刪除
+    python -m signal_monitor.data_utils.clean_csv --dry-run  # 只預覽、不刪除
+    python -m signal_monitor.data_utils.clean_csv -y         # 不詢問，直接刪除（給腳本用）
 """
 import argparse
 import os
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from signal_monitor.paths import PROJECT_ROOT
+
+BASE_DIR = PROJECT_ROOT
 # 這些目錄不進入搜尋（避免誤刪套件/版控內部的 .csv）
 EXCLUDE_DIRS = {"venv", ".venv", "env", ".git", "__pycache__", ".idea", ".vscode"}
 

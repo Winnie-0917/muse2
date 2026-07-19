@@ -10,13 +10,18 @@
 
 ## 一、環境安裝
 
-建立虛擬環境 `venv/` 並安裝：`muselsl 2.5.1`、`bleak 3.0.2`、`pylsl 1.10.5`。
+建立虛擬環境 `venv/`，並以**可編輯模式**安裝本套件（相依套件 `muselsl`、`bleak`、
+`numpy` 都寫在 `pyproject.toml`，會自動一併安裝）：
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-./venv/bin/pip install -r requirements.txt
+pip install -e .
 ```
+
+> 專案已重構為 `src/signal_monitor/` 套件；安裝後即可用 `python -m signal_monitor`
+> 或 `signal-monitor` 執行。若不想安裝，也可在專案根目錄用
+> `PYTHONPATH=src python -m signal_monitor` 直接執行。
 
 ---
 
@@ -24,12 +29,12 @@ source venv/bin/activate
 
 **先讓頭帶進入待連線狀態**：開機、確認 LED 閃爍、且**未被手機 App 佔用**
 
-### 1 請用CLI操作（main.py）
+### 1 請用CLI操作（互動式控制台）
 
 開啟選單式控制台，全部功能都在裡面：
 
 ```bash
-./venv/bin/python main.py
+python -m signal_monitor      # 或安裝後直接執行 signal-monitor
 ```
 
 選單一覽：
@@ -125,17 +130,42 @@ $$\Large FAA = \ln(\alpha_{AF8}) - \ln(\alpha_{AF7})$$
 
 ---
 
-## 六、檔案說明
+## 六、專案結構與檔案說明
 
-| 檔案 | 用途 |
+程式碼統一放在 `src/signal_monitor/` 套件內，輸出資料夾（`Data/`、`FFT/`、`EI/`、
+`FAA/`）維持在專案根目錄。
+
+```
+muse2/
+├── pyproject.toml            # 專案設定與相依套件（取代 requirements.txt）
+├── README.md
+├── Data/  FFT/  EI/  FAA/     # 錄製與分析輸出（.csv 由 .gitignore 忽略）
+└── src/signal_monitor/
+    ├── __main__.py           # python -m signal_monitor → 開啟控制台
+    ├── cli.py                # 互動式控制台（原 main.py）
+    ├── overall_process.py    # 一鍵流程（原 Overall_process.py）
+    ├── paths.py              # 統一計算專案根目錄
+    ├── hardware/             # 設備操作
+    │   ├── list_devices.py   # 掃描附近 MUSE 裝置、取得 BLE address
+    │   └── monitor_raw.py    # 直接 BLE 連線 + 即時監控原始 EEG
+    ├── data_utils/           # 資料處理
+    │   ├── record_csv.py     # 直接 BLE 連線、把原始 EEG 錄成 CSV
+    │   └── clean_csv.py      # 刪除專案內所有 .csv（保留資料夾與 .gitkeep）
+    └── analysis/             # 演算法與分析
+        ├── fft_energy.py     # 每秒 FFT，算 1..128 Hz 各頻率能量
+        ├── engagement.py     # 每秒 NASA 專注度指數 EI + 10 秒滑動平均
+        └── faa.py            # 每秒前額 alpha 不對稱 FAA + 10 秒滑動平均
+```
+
+| 模組 | 用途 |
 |------|------|
-| `main.py`            | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
-| `Overall_process.py` | 一鍵：即時監控+錄製 → FFT → EI → FAA（單一指令跑完整流程）|
-| `list_devices.py`    | 掃描附近 MUSE 裝置、取得 BLE address |
-| `monitor_raw.py`     | 直接 BLE 連線 + 即時監控原始 EEG |
-| `record_csv.py`      | 直接 BLE 連線、把原始 EEG 錄成 CSV |
-| `fft_energy.py`      | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
-| `engagement.py`      | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均 |
-| `faa.py`             | 每秒算前額 alpha 不對稱 FAA + 10 秒滑動平均，輸出 FAA/ |
-| `clean_csv.py`       | 刪除專案內所有 .csv（Data、FFT、EI、FAA），保留資料夾與 .gitkeep |
-| `requirements.txt`| 相依套件 |
+| `signal_monitor`（`python -m signal_monitor`） | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
+| `signal_monitor.overall_process` | 一鍵：即時監控+錄製 → FFT → EI → FAA（單一指令跑完整流程）|
+| `signal_monitor.hardware.list_devices` | 掃描附近 MUSE 裝置、取得 BLE address |
+| `signal_monitor.hardware.monitor_raw`  | 直接 BLE 連線 + 即時監控原始 EEG |
+| `signal_monitor.data_utils.record_csv` | 直接 BLE 連線、把原始 EEG 錄成 CSV |
+| `signal_monitor.analysis.fft_energy`   | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
+| `signal_monitor.analysis.engagement`   | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均 |
+| `signal_monitor.analysis.faa`          | 每秒算前額 alpha 不對稱 FAA + 10 秒滑動平均，輸出 FAA/ |
+| `signal_monitor.data_utils.clean_csv`  | 刪除專案內所有 .csv（Data、FFT、EI、FAA），保留資料夾與 .gitkeep |
+| `pyproject.toml` | 專案設定與相依套件 |

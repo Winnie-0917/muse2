@@ -12,9 +12,9 @@ MUSE 2 原始 EEG：5 通道 = TP9, AF7, AF8, TP10, Right AUX
                 取樣率 256 Hz，單位為微伏（µV）。
 
 用法:
-    ./venv/bin/python monitor_raw.py                       # 自動掃描並連第一台
-    ./venv/bin/python monitor_raw.py --address 00:55:DA:B0:XX:XX
-    ./venv/bin/python monitor_raw.py --fps 20 --window 2   # 調整刷新率與統計視窗
+    python -m signal_monitor.hardware.monitor_raw                       # 自動掃描並連第一台
+    python -m signal_monitor.hardware.monitor_raw --address 00:55:DA:B0:XX:XX
+    python -m signal_monitor.hardware.monitor_raw --fps 20 --window 2   # 調整刷新率與統計視窗
 
 按 Ctrl+C 結束。
 
@@ -169,7 +169,7 @@ def resolve_address(args):
     print("掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...")
     muses = list_muses(backend="bleak")
     if not muses:
-        sys.exit("找不到 MUSE 裝置。先執行  ./venv/bin/python list_devices.py  排查。")
+        sys.exit("找不到 MUSE 裝置。先執行  python -m signal_monitor.hardware.list_devices  排查。")
     m = muses[0]
     print(f"使用裝置：{m['name']}  [{m['address']}]")
     return m["address"], m["name"]

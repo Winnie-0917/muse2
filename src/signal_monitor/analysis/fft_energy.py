@@ -26,9 +26,9 @@ MUSE 2 取樣率 = 256 Hz，所以「1 秒」= 256 個樣本。
 
 用法
 ----
-    ./venv/bin/python fft_energy.py                  # 分析 Data/ 內最新（編號最大）的檔
-    ./venv/bin/python fft_energy.py Data/1.csv         # 指定輸入檔
-    ./venv/bin/python fft_energy.py Data/1.csv --fs 256 --out FFT
+    python -m signal_monitor.analysis.fft_energy                  # 分析 Data/ 內最新（編號最大）的檔
+    python -m signal_monitor.analysis.fft_energy Data/1.csv       # 指定輸入檔
+    python -m signal_monitor.analysis.fft_energy Data/1.csv --fs 256 --out FFT
 """
 import argparse
 import csv
@@ -38,7 +38,9 @@ import sys
 
 import numpy as np
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from signal_monitor.paths import PROJECT_ROOT
+
+BASE_DIR = PROJECT_ROOT
 CSV_DIR = os.path.join(BASE_DIR, "Data")
 CHANNELS = ["TP9", "AF7", "AF8", "TP10"]
 

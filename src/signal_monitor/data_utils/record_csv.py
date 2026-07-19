@@ -8,8 +8,8 @@
 檔案一律存到 Data/ 資料夾，並以流水號命名：1.csv, 2.csv, 3.csv ...
 
 用法:
-    ./venv/bin/python record_csv.py                          # 自動掃描，錄到 Data/<下一個編號>.csv
-    ./venv/bin/python record_csv.py --address 00:55:DA:B0:XX:XX --seconds 60
+    python -m signal_monitor.data_utils.record_csv                          # 自動掃描，錄到 Data/<下一個編號>.csv
+    python -m signal_monitor.data_utils.record_csv --address 00:55:DA:B0:XX:XX --seconds 60
 
 按 Ctrl+C 可提前結束並存檔。
 """
@@ -20,8 +20,10 @@ import re
 import sys
 import time
 
+from signal_monitor.paths import PROJECT_ROOT
+
 # 預設把錄製檔存到專案下的 Data/ 資料夾
-CSV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
+CSV_DIR = os.path.join(PROJECT_ROOT, "Data")
 
 from muselsl import list_muses, backends
 from muselsl.muse import Muse

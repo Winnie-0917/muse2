@@ -1,5 +1,0 @@
-# MUSE 2 raw EEG acquisition over BLE
-# Install into a virtualenv:  python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-muselsl        # MUSE streaming layer (pulls in pylsl)
-bleak          # Native Linux BLE backend (BlueZ / D-Bus), no dongle-specific drivers needed
-numpy          # 陣列運算 + monitor_raw 統計 + fft_energy.py 的每秒 FFT 分析
