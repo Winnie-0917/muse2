@@ -111,9 +111,17 @@ $$
 **長度 10 的佇列滑動平均**：用每過 1 秒給一個「以過去 10 秒為基準」的平滑專注度，方便對比使用者當下的操作行為。
 
 ---
-五
+## 五、情緒與趨近動機（Frontal Alpha Asymmetry, FAA）
 
-$$FAA = \ln(\alpha_{AF8}) - \ln(\alpha_{AF7})$$
+原理： 前額葉的不對稱性與情緒極度相關。左前額葉活躍代表「趨近、積極、感興趣」，右前額葉活躍代表「逃避、挫折、無聊」。
+
+&nbsp;
+
+$$\Large FAA = \ln(\alpha_{AF8}) - \ln(\alpha_{AF7})$$
+
+&nbsp;
+
+應用： 數值為正，代表使用者覺得有趣、有成就感；數值為負，代表使用者感到挫折或想放棄。
 
 ---
 
@@ -122,11 +130,12 @@ $$FAA = \ln(\alpha_{AF8}) - \ln(\alpha_{AF7})$$
 | 檔案 | 用途 |
 |------|------|
 | `main.py`            | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
-| `Overall_process.py` | 一鍵：即時監控+錄製 → FFT → EI（單一指令跑完整流程）|
+| `Overall_process.py` | 一鍵：即時監控+錄製 → FFT → EI → FAA（單一指令跑完整流程）|
 | `list_devices.py`    | 掃描附近 MUSE 裝置、取得 BLE address |
 | `monitor_raw.py`     | 直接 BLE 連線 + 即時監控原始 EEG |
 | `record_csv.py`      | 直接 BLE 連線、把原始 EEG 錄成 CSV |
 | `fft_energy.py`      | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
 | `engagement.py`      | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均 |
-| `clean_csv.py`       | 刪除專案內所有 .csv（Data、FFT、EI），保留資料夾與 .gitkeep |
+| `faa.py`             | 每秒算前額 alpha 不對稱 FAA + 10 秒滑動平均，輸出 FAA/ |
+| `clean_csv.py`       | 刪除專案內所有 .csv（Data、FFT、EI、FAA），保留資料夾與 .gitkeep |
 | `requirements.txt`| 相依套件 |
