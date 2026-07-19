@@ -242,12 +242,9 @@ def view_fft_peaks():
     print(f"{DIM}（主頻若在 60 Hz 附近多為市電干擾/接觸不良；正常 EEG 多集中在低頻）{RESET}")
 
 
-def do_cat():
-    """如 cat 指令：選一個 Data/ 錄製檔，直接印出整個檔案原始內容。"""
-    path = choose_recording()
-    if not path:
-        return
-    clear()   # 選完檔後清屏，畫面只留檔案內容
+def cat_file(path):
+    """如 cat：清屏後把整個檔案原始內容逐行印出。"""
+    clear()
     rel = os.path.relpath(path, BASE_DIR)
     try:
         with open(path) as f:
@@ -263,6 +260,58 @@ def do_cat():
     if not content.endswith("\n"):
         sys.stdout.write("\n")
     print(f"{DIM}{'-' * 44}{RESET}")
+
+
+def pick_csv_in_dir(d, label):
+    """列出目錄 d 內的 *.csv 讓使用者選一個，回傳完整路徑或 None。"""
+    if not os.path.isdir(d):
+        print(f"{YELLOW}{label} 資料夾不存在（還沒產生資料）。{RESET}")
+        return None
+    files = sorted(f for f in os.listdir(d) if f.endswith(".csv"))
+    if not files:
+        print(f"{YELLOW}{label} 內還沒有任何 .csv。{RESET}")
+        return None
+    print(f"\n{BOLD}{label} 內的檔案：{RESET}")
+    for i, f in enumerate(files):
+        print(f"  [{i}] {f}")
+    sel = ask("選擇編號：")
+    if sel and sel.isdigit() and int(sel) < len(files):
+        return os.path.join(d, files[int(sel)])
+    print(f"{RED}無效的選擇。{RESET}")
+    return None
+
+
+def do_cat():
+    """查看原始數據：選 EI 或 FFT 裡的 csv，如 cat 直接印出內容。"""
+    print(f"{BOLD}{CYAN}== 查看原始數據 =={RESET}\n")
+    print("  [1] EI 專注度結果（EI/）")
+    print("  [2] FFT 頻譜能量（FFT/<通道>/）")
+    print("  [0] 返回")
+    c = ask("\n請選擇：")
+
+    if c == "1":
+        path = pick_csv_in_dir(os.path.join(BASE_DIR, "EI"), "EI")
+        if path:
+            cat_file(path)
+    elif c == "2":
+        fft_dir = os.path.join(BASE_DIR, "FFT")
+        chans = [ch for ch in CHANNELS
+                 if os.path.isdir(os.path.join(fft_dir, ch))
+                 and any(f.endswith(".csv") for f in os.listdir(os.path.join(fft_dir, ch)))]
+        if not chans:
+            print(f"{YELLOW}FFT/ 內還沒有任何資料。先做一次 FFT（選單 [5]）。{RESET}")
+            return
+        print(f"\n{BOLD}選擇通道：{RESET}")
+        for i, ch in enumerate(chans):
+            print(f"  [{i}] {ch}")
+        sel = ask("通道編號：")
+        if not (sel and sel.isdigit() and int(sel) < len(chans)):
+            print(f"{RED}無效的選擇。{RESET}")
+            return
+        ch = chans[int(sel)]
+        path = pick_csv_in_dir(os.path.join(fft_dir, ch), f"FFT/{ch}")
+        if path:
+            cat_file(path)
 
 
 def do_view_data():
@@ -307,8 +356,8 @@ MENU = f"""{BOLD}{CYAN}============================================
 
  {BOLD}查看 / 管理{RESET}
    [7] 查看數據（訊號摘要 / EI 結果 / FFT 主頻）
-   [9] 查看原始數據（如 cat 直接顯示檔案內容）
    [8] 刪除專案內所有 CSV
+   [9] 查看原始數據
    [0] 離開
 {DIM}--------------------------------------------{RESET}"""
 
@@ -316,7 +365,7 @@ MENU = f"""{BOLD}{CYAN}============================================
 def main():
     actions = {
         "1": do_scan, "2": do_monitor, "3": do_record, "4": do_pipeline,
-        "5": do_fft, "6": do_ei, "7": do_view_data, "9": do_cat, "8": do_clean,
+        "5": do_fft, "6": do_ei, "7": do_view_data, "8": do_clean, "9": do_cat,
     }
     while True:
         clear()
