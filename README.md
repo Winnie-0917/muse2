@@ -10,18 +10,13 @@
 
 ## 一、環境安裝
 
-建立虛擬環境 `venv/`，並以**可編輯模式**安裝本套件（相依套件 `muselsl`、`bleak`、
-`numpy` 都寫在 `pyproject.toml`，會自動一併安裝）：
+建立虛擬環境 `venv/`，並以**可編輯模式**安裝本套件（相依套件 `muselsl`、`bleak`、`numpy` 都寫在 `pyproject.toml`，會自動一併安裝）：
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
 ```
-
-> 專案已重構為 `src/signal_monitor/` 套件；安裝後即可用 `python -m signal_monitor`
-> 或 `signal-monitor` 執行。若不想安裝，也可在專案根目錄用
-> `PYTHONPATH=src python -m signal_monitor` 直接執行。
 
 ---
 
@@ -159,7 +154,7 @@ muse2/
 
 | 模組 | 用途 |
 |------|------|
-| `signal_monitor`（`python -m signal_monitor`） | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
+| `signal_monitor` | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
 | `signal_monitor.overall_process` | 一鍵：即時監控+錄製 → FFT → EI → FAA（單一指令跑完整流程）|
 | `signal_monitor.hardware.list_devices` | 掃描附近 MUSE 裝置、取得 BLE address |
 | `signal_monitor.hardware.monitor_raw`  | 直接 BLE 連線 + 即時監控原始 EEG |
