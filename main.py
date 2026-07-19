@@ -148,6 +148,7 @@ def do_ei():
     path = choose_recording()
     if path:
         run_script("engagement.py", path)
+        run_script("faa.py", path)
 
 
 def do_clean():
@@ -282,15 +283,20 @@ def pick_csv_in_dir(d, label):
 
 
 def do_cat():
-    """查看原始數據：選 EI 或 FFT 裡的 csv，如 cat 直接印出內容。"""
+    """查看原始數據：選 EI / FFT / FAA 裡的 csv，如 cat 直接印出內容。"""
     print(f"{BOLD}{CYAN}== 查看原始數據 =={RESET}\n")
     print("  [1] EI 專注度結果（EI/）")
     print("  [2] FFT 頻譜能量（FFT/<通道>/）")
+    print("  [3] FAA 前額 alpha 不對稱（FAA/）")
     print("  [0] 返回")
     c = ask("\n請選擇：")
 
     if c == "1":
         path = pick_csv_in_dir(os.path.join(BASE_DIR, "EI"), "EI")
+        if path:
+            cat_file(path)
+    elif c == "3":
+        path = pick_csv_in_dir(os.path.join(BASE_DIR, "FAA"), "FAA")
         if path:
             cat_file(path)
     elif c == "2":
@@ -352,7 +358,7 @@ MENU = f"""{BOLD}{CYAN}============================================
 
  {BOLD}分析{RESET}
    [5] 對錄製檔做每秒 FFT（輸出 FFT/）
-   [6] 對錄製檔算專注度 EI（輸出 EI/）
+   [6] 對錄製檔算 EI + FAA（輸出 EI/、FAA/）
 
  {BOLD}查看 / 管理{RESET}
    [7] 查看數據（訊號摘要 / EI 結果 / FFT 主頻）
