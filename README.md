@@ -112,11 +112,12 @@ $$
 
 | 檔案 | 用途 |
 |------|------|
-| `main.py`         | **一鍵：即時監控+錄製 → FFT → EI**|
-| `list_devices.py` | 掃描附近 MUSE 裝置、取得 BLE address |
-| `monitor_raw.py`  | 直接 BLE 連線 + 即時監控原始 EEG|
-| `record_csv.py`   | 直接 BLE 連線、把原始 EEG 錄成 CSV |
-| `fft_energy.py`   | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
-| `engagement.py`   | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均，|
-| `clean_csv.py`    | 刪除專案內所有 .csv（csv/ei/fft）|
+| `main.py`            | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
+| `Overall_process.py` | 一鍵：即時監控+錄製 → FFT → EI（單一指令跑完整流程）|
+| `list_devices.py`    | 掃描附近 MUSE 裝置、取得 BLE address |
+| `monitor_raw.py`     | 直接 BLE 連線 + 即時監控原始 EEG |
+| `record_csv.py`      | 直接 BLE 連線、把原始 EEG 錄成 CSV |
+| `fft_energy.py`      | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
+| `engagement.py`      | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均 |
+| `clean_csv.py`       | 刪除專案內所有 .csv（Data、FFT、EI），保留資料夾與 .gitkeep |
 | `requirements.txt`| 相依套件 |
