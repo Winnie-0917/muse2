@@ -1,0 +1,33 @@
+# 專案設定與相依套件（取代原本的 requirements.txt）。
+#
+# 安裝（建議在虛擬環境內，以可編輯模式安裝，之後改程式碼免重裝）：
+#     python3 -m venv venv
+#     source venv/bin/activate
+#     pip install -e .
+#
+# 安裝後即可用：
+#     python -m signal_monitor                         # 互動式控制台（原 main.py）
+#     signal-monitor                                    # 同上，console script
+#     python -m signal_monitor.overall_process --seconds 60
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signal-monitor"
+version = "0.1.0"
+description = "MUSE 2 原始 EEG 擷取、每秒 FFT、專注度指數 EI 與前額 alpha 不對稱 FAA"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "muselsl",   # MUSE 串流層（會一併安裝 pylsl）
+    "bleak",     # Linux 原生 BLE 後端（BlueZ / D-Bus，免額外驅動）
+    "numpy",     # 陣列運算 + 即時監控統計 + 每秒 FFT 分析
+]
+
+[project.scripts]
+# 安裝後可直接用 `signal-monitor` 開啟互動式控制台
+signal-monitor = "signal_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

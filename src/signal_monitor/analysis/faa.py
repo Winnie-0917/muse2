@@ -26,9 +26,9 @@ FAA（Frontal Alpha Asymmetry，前額 alpha 不對稱）分析。
 
 用法
 ----
-    ./venv/bin/python faa.py                 # 分析 Data/ 內編號最大的檔
-    ./venv/bin/python faa.py Data/1.csv       # 指定輸入檔
-    ./venv/bin/python faa.py Data/1.csv --window 10 --fs 256
+    python -m signal_monitor.analysis.faa                        # 分析 Data/ 內編號最大的檔
+    python -m signal_monitor.analysis.faa Data/1.csv             # 指定輸入檔
+    python -m signal_monitor.analysis.faa Data/1.csv --window 10 --fs 256
 """
 import argparse
 import csv
@@ -40,7 +40,7 @@ from collections import deque
 import numpy as np
 
 # 沿用 FFT 腳本（每秒 FFT、讀檔、找最新檔）與 EI 腳本的頻帶定義
-from fft_energy import (
+from signal_monitor.analysis.fft_energy import (
     BASE_DIR,
     CSV_DIR,
     CHANNELS,
@@ -48,7 +48,7 @@ from fft_energy import (
     load_eeg,
     per_second_energy,
 )
-from engagement import band_energy  # alpha 頻帶能量（與 EI 用同一套 BANDS）
+from signal_monitor.analysis.engagement import band_energy  # alpha 頻帶能量（與 EI 用同一套 BANDS）
 
 
 def main():

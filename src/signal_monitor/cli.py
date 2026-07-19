@@ -5,11 +5,12 @@ MUSE 2 EEG 互動式控制台（終端機選單）。
 把整個流程整合到一個介面：掃描裝置、即時監控、錄製、一鍵流程（監控+錄製→FFT→EI）、
 單獨做 FFT / EI，以及「查看數據」（列出錄製檔、訊號摘要、EI 結果、FFT 主頻）與清除資料。
 
-擷取/監控類功能會以子程序呼叫既有腳本（monitor_raw.py / record_csv.py / Overall_process.py …），
-這樣即時畫面能正常顯示；查看數據則直接讀 Data/、EI/、FFT/ 內的 CSV 算給你看。
+擷取/監控類功能會以子程序呼叫既有模組（python -m signal_monitor.hardware.monitor_raw /
+…record_csv / …overall_process …），這樣即時畫面能正常顯示；查看數據則直接讀
+Data/、EI/、FFT/ 內的 CSV 算給你看。
 
 用法:
-    ./venv/bin/python main.py
+    python -m signal_monitor
 """
 import os
 import re
@@ -19,8 +20,8 @@ import sys
 import numpy as np
 
 # 重用既有模組的路徑與函式
-from record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
-from fft_energy import BASE_DIR, CHANNELS, load_eeg
+from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
+from signal_monitor.analysis.fft_energy import BASE_DIR, CHANNELS, load_eeg
 
 PY = sys.executable                       # 目前的 venv python
 EI_DIR = os.path.join(BASE_DIR, "EI")
@@ -56,9 +57,9 @@ def ask(prompt, default=None):
     return s if s else default
 
 
-def run_script(script, *args):
-    """以子程序執行專案內腳本，繼承終端機（即時 UI 正常）。"""
-    cmd = [PY, os.path.join(BASE_DIR, script), *[a for a in args if a is not None]]
+def run_module(module, *args):
+    """以子程序執行套件內模組（python -m ...），繼承終端機（即時 UI 正常）。"""
+    cmd = [PY, "-m", module, *[a for a in args if a is not None]]
     print(f"{DIM}$ {' '.join(cmd)}{RESET}\n")
     try:
         subprocess.run(cmd)
@@ -126,35 +127,35 @@ def do_scan():
 
 
 def do_monitor():
-    run_script("monitor_raw.py", *device_args())
+    run_module("signal_monitor.hardware.monitor_raw", *device_args())
 
 
 def do_record():
     secs = ask("要錄幾秒？（Enter = 一直錄到 Ctrl+C）：", default="0")
-    run_script("record_csv.py", *device_args(), "--seconds", secs)
+    run_module("signal_monitor.data_utils.record_csv", *device_args(), "--seconds", secs)
 
 
 def do_pipeline():
     secs = ask("一鍵流程要錄幾秒？（建議 ≥10；Enter = 錄到 Ctrl+C）：", default="0")
-    run_script("Overall_process.py", *device_args(), "--seconds", secs)
+    run_module("signal_monitor.overall_process", *device_args(), "--seconds", secs)
 
 
 def do_fft():
     path = choose_recording()
     if path:
-        run_script("fft_energy.py", path)
+        run_module("signal_monitor.analysis.fft_energy", path)
 
 
 def do_ei():
     path = choose_recording()
     if path:
-        run_script("engagement.py", path)
-        run_script("faa.py", path)
+        run_module("signal_monitor.analysis.engagement", path)
+        run_module("signal_monitor.analysis.faa", path)
 
 
 def do_clean():
-    # clean_csv.py 內含 y/N 確認，直接交給它
-    run_script("clean_csv.py")
+    # clean_csv 內含 y/N 確認，直接交給它
+    run_module("signal_monitor.data_utils.clean_csv")
 
 
 # ---------- 查看數據 ----------

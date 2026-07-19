@@ -23,8 +23,8 @@ def main():
     print(f"\n找到 {len(muses)} 台 MUSE 裝置：\n")
     for i, m in enumerate(muses):
         print(f"  [{i}] {m['name']:<20} address = {m['address']}")
-    print("\n把上面的 address 傳給 monitor_raw.py：")
-    print(f"  ./venv/bin/python monitor_raw.py --address {muses[0]['address']}")
+    print("\n把上面的 address 傳給即時監控：")
+    print(f"  python -m signal_monitor.hardware.monitor_raw --address {muses[0]['address']}")
 
 
 if __name__ == "__main__":

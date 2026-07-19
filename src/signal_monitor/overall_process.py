@@ -14,11 +14,11 @@
 停止錄製的方式：--seconds 到時自動停，或隨時按 Ctrl+C。
 
 用法:
-    ./venv/bin/python Overall_process.py                              # 自動掃描，錄到 Ctrl+C 為止
-    ./venv/bin/python Overall_process.py --seconds 60                 # 錄 60 秒後自動分析
-    ./venv/bin/python Overall_process.py --address 00:55:DA:B6:35:CA --seconds 60
-    ./venv/bin/python Overall_process.py --aux                        # 即時畫面也顯示 AUX
-    ./venv/bin/python Overall_process.py --no-analyze                 # 只監控+錄製，不做 FFT/EI
+    python -m signal_monitor.overall_process                              # 自動掃描，錄到 Ctrl+C 為止
+    python -m signal_monitor.overall_process --seconds 60                 # 錄 60 秒後自動分析
+    python -m signal_monitor.overall_process --address 00:55:DA:B6:35:CA --seconds 60
+    python -m signal_monitor.overall_process --aux                        # 即時畫面也顯示 AUX
+    python -m signal_monitor.overall_process --no-analyze                 # 只監控+錄製，不做 FFT/EI
 
 備註：EI 的「穩定分數」需要滿 10 秒才會輸出，想看平滑專注度請至少錄 10 秒以上。
 """
@@ -33,13 +33,11 @@ from muselsl import list_muses, backends
 from muselsl.muse import Muse
 
 # 重用即時監控（畫面）與錄製（檔名/通道）的既有元件
-from monitor_raw import (
+from signal_monitor.hardware.monitor_raw import (
     Monitor, render,
     CLEAR, HIDE_CURSOR, SHOW_CURSOR, RESET, BOLD, CYAN, DIM,
 )
-from record_csv import CSV_DIR, next_csv_path, CHANNELS as REC_CHANNELS
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path, CHANNELS as REC_CHANNELS
 
 
 class LiveRecorder:
@@ -68,21 +66,21 @@ def resolve_address(args):
     print("掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...")
     muses = list_muses(backend="bleak")
     if not muses:
-        sys.exit("找不到 MUSE 裝置。先執行 ./venv/bin/python list_devices.py 排查。")
+        sys.exit("找不到 MUSE 裝置。先執行 python -m signal_monitor.hardware.list_devices 排查。")
     print(f"使用裝置：{muses[0]['name']}  [{muses[0]['address']}]")
     return muses[0]["address"], muses[0]["name"]
 
 
 def run_analysis(csv_path):
-    """依序執行 FFT、EI、FAA 分析（沿用既有腳本，輸出到 FFT/、EI/、FAA/）。"""
+    """依序執行 FFT、EI、FAA 分析（沿用既有模組，輸出到 FFT/、EI/、FAA/）。"""
     py = sys.executable  # 目前的 venv python
     # 先 flush 再叫子程序，確保標題印在子程序輸出「之前」（輸出被導向檔案時尤其重要）
-    print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT（fft_energy.py）==={RESET}", flush=True)
-    subprocess.run([py, os.path.join(BASE_DIR, "fft_energy.py"), csv_path])
-    print(f"\n{BOLD}{CYAN}=== 步驟 3：專注度指數 EI（engagement.py）==={RESET}", flush=True)
-    subprocess.run([py, os.path.join(BASE_DIR, "engagement.py"), csv_path])
-    print(f"\n{BOLD}{CYAN}=== 步驟 4：前額 alpha 不對稱 FAA（faa.py）==={RESET}", flush=True)
-    subprocess.run([py, os.path.join(BASE_DIR, "faa.py"), csv_path])
+    print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT（fft_energy）==={RESET}", flush=True)
+    subprocess.run([py, "-m", "signal_monitor.analysis.fft_energy", csv_path])
+    print(f"\n{BOLD}{CYAN}=== 步驟 3：專注度指數 EI（engagement）==={RESET}", flush=True)
+    subprocess.run([py, "-m", "signal_monitor.analysis.engagement", csv_path])
+    print(f"\n{BOLD}{CYAN}=== 步驟 4：前額 alpha 不對稱 FAA（faa）==={RESET}", flush=True)
+    subprocess.run([py, "-m", "signal_monitor.analysis.faa", csv_path])
 
 
 def main():

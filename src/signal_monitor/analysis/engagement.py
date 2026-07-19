@@ -28,9 +28,9 @@ NASA 專注度 / 投入度指數（Engagement Index, EI）分析。
 
 用法
 ----
-    ./venv/bin/python engagement.py                 # 分析 Data/ 內編號最大的檔
-    ./venv/bin/python engagement.py Data/1.csv        # 指定輸入檔
-    ./venv/bin/python engagement.py Data/1.csv --window 10 --fs 256
+    python -m signal_monitor.analysis.engagement                 # 分析 Data/ 內編號最大的檔
+    python -m signal_monitor.analysis.engagement Data/1.csv       # 指定輸入檔
+    python -m signal_monitor.analysis.engagement Data/1.csv --window 10 --fs 256
 """
 import argparse
 import csv
@@ -42,7 +42,7 @@ from collections import deque
 import numpy as np
 
 # 沿用「之前的 FFT 腳本」的函式（每秒 FFT、讀檔、找最新檔）
-from fft_energy import (
+from signal_monitor.analysis.fft_energy import (
     BASE_DIR,
     CSV_DIR,
     CHANNELS,
