@@ -39,7 +39,8 @@ FS = 256  # Hz
 
 # ANSI 控制碼
 HOME = "\033[H"          # 游標移到左上角
-CLEAR = "\033[2J"        # 清整個畫面
+# 2J 清畫面、3J 清捲動歷史(scrollback)、H 游標回左上 -> 徹底清掉連線訊息，只留即時畫面
+CLEAR = "\033[2J\033[3J\033[H"
 CLEAR_EOL = "\033[K"     # 清到行尾
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
@@ -208,6 +209,7 @@ def main():
     muse.start()  # 送出開始串流指令
 
     sys.stdout.write(CLEAR + HIDE_CURSOR)
+    sys.stdout.flush()   # 立即清掉上面的連線訊息，再開始即時畫面
     period = 1.0 / max(args.fps, 1.0)
     try:
         while True:

@@ -121,6 +121,7 @@ def main():
     print(f"開始 -> {out_path}（{hint}）")
 
     sys.stdout.write(CLEAR + HIDE_CURSOR)
+    sys.stdout.flush()   # 立即清掉上面的連線/開始訊息，再開始即時畫面
     period = 1.0 / max(args.fps, 1.0)
     t0 = time.time()
     try:
