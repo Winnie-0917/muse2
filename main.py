@@ -25,6 +25,7 @@ from fft_energy import BASE_DIR, CHANNELS, load_eeg
 PY = sys.executable                       # 目前的 venv python
 EI_DIR = os.path.join(BASE_DIR, "EI")
 FFT_DIR = os.path.join(BASE_DIR, "FFT")
+FAA_DIR = os.path.join(BASE_DIR, "FAA")
 
 # ANSI
 BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
@@ -212,6 +213,44 @@ def view_ei_result():
         print(f"{YELLOW}此段未滿 10 秒，沒有穩定分數。{RESET}")
 
 
+def view_faa_result():
+    files = [f for f in os.listdir(FAA_DIR) if re.match(r"^\d+\.csv$", f)] if os.path.isdir(FAA_DIR) else []
+    if not files:
+        print(f"{YELLOW}FAA/ 內沒有結果。先對某個錄製檔跑「算 FAA」（選單 [6]）。{RESET}")
+        return
+    files.sort(key=lambda x: int(x[:-4]))
+    print(f"{BOLD}FAA/ 內的結果：{RESET} " + ", ".join(files))
+    stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
+    path = os.path.join(FAA_DIR, f"{stem}.csv")
+    if not os.path.exists(path):
+        print(f"{RED}找不到 {path}{RESET}")
+        return
+    import csv as _csv
+    secs, faas, smooths = [], [], []
+    with open(path) as f:
+        r = _csv.reader(f)
+        next(r)
+        for row in r:
+            if not row:
+                continue
+            secs.append(int(row[0]))
+            faas.append(float(row[1]) if row[1] else float("nan"))
+            smooths.append(float(row[2]) if len(row) > 2 and row[2] else float("nan"))
+    print(f"\n{BOLD}{'秒':>3}  {'FAA(每秒)':>10}  {'穩定FAA(10秒平均)':>16}{RESET}")
+    for s, e, sm in zip(secs, faas, smooths):
+        e_str = "nan" if np.isnan(e) else f"{e:+.4f}"
+        sm_str = f"{sm:+.4f}" if not np.isnan(sm) else f"{DIM}—{RESET}"
+        print(f"{s:>3}  {e_str:>10}  {sm_str:>16}")
+    valid = [v for v in smooths if not np.isnan(v)]
+    if valid:
+        avg = np.mean(valid)
+        tone = "偏正向/趨近" if avg > 0 else "偏負向/退縮"
+        print(f"\n{GREEN}穩定分數 {len(valid)} 個，平均 = {avg:+.4f}（{tone}），"
+              f"最新 = {valid[-1]:+.4f}{RESET}")
+    else:
+        print(f"{YELLOW}此段未滿 10 秒，沒有穩定分數。{RESET}")
+
+
 def view_fft_peaks():
     stem = None
     # 以 TP9 資料夾判斷有哪些編號
@@ -330,6 +369,7 @@ def do_view_data():
         print("  [1] 錄製檔訊號摘要（每通道 平均/RMS/最小/最大）")
         print("  [2] 查看 EI 專注度結果")
         print("  [3] 查看 FFT 主頻與頻帶能量")
+        print("  [4] 查看 FAA 前額 alpha 不對稱")
         print("  [0] 返回主選單")
         c = ask("\n請選擇：")
         if c == "1":
@@ -338,6 +378,8 @@ def do_view_data():
             clear(); view_ei_result(); pause()
         elif c == "3":
             clear(); view_fft_peaks(); pause()
+        elif c == "4":
+            clear(); view_faa_result(); pause()
         elif c in ("0", None, "q"):
             return
         else:
@@ -361,7 +403,7 @@ MENU = f"""{BOLD}{CYAN}============================================
    [6] 對錄製檔算 EI + FAA（輸出 EI/、FAA/）
 
  {BOLD}查看 / 管理{RESET}
-   [7] 查看數據（訊號摘要 / EI 結果 / FFT 主頻）
+   [7] 查看數據（訊號摘要 / EI / FFT / FAA）
    [8] 刪除專案內所有 CSV
    [9] 查看原始數據
    [0] 離開
