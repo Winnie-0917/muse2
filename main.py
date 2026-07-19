@@ -242,6 +242,29 @@ def view_fft_peaks():
     print(f"{DIM}（主頻若在 60 Hz 附近多為市電干擾/接觸不良；正常 EEG 多集中在低頻）{RESET}")
 
 
+def do_cat():
+    """如 cat 指令：選一個 Data/ 錄製檔，直接印出整個檔案原始內容。"""
+    path = choose_recording()
+    if not path:
+        return
+    clear()   # 選完檔後清屏，畫面只留檔案內容
+    rel = os.path.relpath(path, BASE_DIR)
+    try:
+        with open(path) as f:
+            content = f.read()
+    except OSError as e:
+        print(f"{RED}無法讀取 {rel}：{e}{RESET}")
+        return
+    n_lines = content.count("\n")
+    print(f"{BOLD}{CYAN}== 原始數據（cat）：{rel} =={RESET}")
+    print(f"{DIM}共 {n_lines} 行（含表頭）；以下為檔案原始內容{RESET}")
+    print(f"{DIM}{'-' * 44}{RESET}")
+    sys.stdout.write(content)
+    if not content.endswith("\n"):
+        sys.stdout.write("\n")
+    print(f"{DIM}{'-' * 44}{RESET}")
+
+
 def do_view_data():
     while True:
         clear()
@@ -284,6 +307,7 @@ MENU = f"""{BOLD}{CYAN}============================================
 
  {BOLD}查看 / 管理{RESET}
    [7] 查看數據（訊號摘要 / EI 結果 / FFT 主頻）
+   [9] 查看原始數據（如 cat 直接顯示檔案內容）
    [8] 刪除專案內所有 CSV
    [0] 離開
 {DIM}--------------------------------------------{RESET}"""
@@ -292,7 +316,7 @@ MENU = f"""{BOLD}{CYAN}============================================
 def main():
     actions = {
         "1": do_scan, "2": do_monitor, "3": do_record, "4": do_pipeline,
-        "5": do_fft, "6": do_ei, "7": do_view_data, "8": do_clean,
+        "5": do_fft, "6": do_ei, "7": do_view_data, "9": do_cat, "8": do_clean,
     }
     while True:
         clear()
