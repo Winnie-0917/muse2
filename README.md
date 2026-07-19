@@ -23,22 +23,22 @@ python3 -m venv venv
 
 **先讓頭帶進入待連線狀態**：開機、確認 LED 閃爍、且**未被手機 App 佔用**
 
-### 互動式控制台（`cli.py`）★最推薦
+### 互動式控制台（`main.py`）★最推薦
 
 不想記指令的話，直接開這個選單式介面，所有功能一鍵操作：
 
 ```bash
-./venv/bin/python cli.py
+./venv/bin/python main.py
 ```
 
 選單包含：掃描/選擇裝置、即時監控、錄製、一鍵流程（監控+錄製→FFT→EI）、
 單獨做 FFT / EI，以及**查看數據**（列出錄製檔、訊號摘要、EI 專注度結果、FFT 主頻與頻帶能量）、
 刪除所有 CSV。底層仍是呼叫下面各支腳本，兩種用法可混用。
 
-### 0 一鍵完成全部（`main.py`）★推薦
+### 0 一鍵完成全部（`Overall_process.py`）★推薦
 
 ```bash
-./venv/bin/python main.py --address 00:55:DA:B6:35:CA --seconds 60
+./venv/bin/python Overall_process.py --address 00:55:DA:B6:35:CA --seconds 60
 ```
 
 一條龍：**即時監控 + 錄製到 `Data/` → 停止後自動跑 FFT（`FFT/`）→ 再跑 EI（`EI/`）**。
@@ -148,8 +148,8 @@ $$
 
 | 檔案 | 用途 |
 |------|------|
-| `cli.py`          | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
-| `main.py`         | 一鍵：即時監控+錄製 → FFT → EI（單一指令跑完整流程）|
+| `main.py`          | **互動式控制台**：選單操作全部功能 + 查看數據（最推薦入口）|
+| `Overall_process.py`         | 一鍵：即時監控+錄製 → FFT → EI（單一指令跑完整流程）|
 | `list_devices.py` | 掃描附近 MUSE 裝置、取得 BLE address |
 | `monitor_raw.py`  | **直接 BLE 連線 + 即時監控原始 EEG**（主程式）|
 | `record_csv.py`   | 直接 BLE 連線、把原始 EEG 錄成 CSV |

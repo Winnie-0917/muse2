@@ -1,162 +1,322 @@
 #!/usr/bin/env python3
 """
-一鍵流程：即時監控 + 錄製 CSV → FFT → EI 專注度。
+MUSE 2 EEG 互動式控制台（終端機選單）。
 
-這支程式把專案的四個步驟串成一條龍（重用既有腳本，不重寫邏輯）：
+把整個流程整合到一個介面：掃描裝置、即時監控、錄製、一鍵流程（監控+錄製→FFT→EI）、
+單獨做 FFT / EI，以及「查看數據」（列出錄製檔、訊號摘要、EI 結果、FFT 主頻）與清除資料。
 
-  步驟 1（同時進行）：直接 BLE 連線 MUSE 2，
-      - 終端機即時顯示原始 EEG（4 通道波形 / RMS / 訊號品質 / 取樣率）
-      - 同一份資料逐一樣本寫入 Data/<編號>.csv
-  步驟 2：停止後自動對該檔跑 fft_energy.py（每秒 FFT → FFT/<通道>/<編號>.csv）
-  步驟 3：再跑 engagement.py（每秒 EI + 10 秒滑動平均 → EI/<編號>.csv）
-
-停止錄製的方式：--seconds 到時自動停，或隨時按 Ctrl+C。
+擷取/監控類功能會以子程序呼叫既有腳本（monitor_raw.py / record_csv.py / Overall_process.py …），
+這樣即時畫面能正常顯示；查看數據則直接讀 Data/、EI/、FFT/ 內的 CSV 算給你看。
 
 用法:
-    ./venv/bin/python main.py                              # 自動掃描，錄到 Ctrl+C 為止
-    ./venv/bin/python main.py --seconds 60                 # 錄 60 秒後自動分析
-    ./venv/bin/python main.py --address 00:55:DA:B6:35:CA --seconds 60
-    ./venv/bin/python main.py --aux                        # 即時畫面也顯示 AUX
-    ./venv/bin/python main.py --no-analyze                 # 只監控+錄製，不做 FFT/EI
-
-備註：EI 的「穩定分數」需要滿 10 秒才會輸出，想看平滑專注度請至少錄 10 秒以上。
+    ./venv/bin/python main.py
 """
-import argparse
-import csv
 import os
+import re
 import subprocess
 import sys
-import time
 
-from muselsl import list_muses, backends
-from muselsl.muse import Muse
+import numpy as np
 
-# 重用即時監控（畫面）與錄製（檔名/通道）的既有元件
-from monitor_raw import (
-    Monitor, render,
-    CLEAR, HIDE_CURSOR, SHOW_CURSOR, RESET, BOLD, CYAN, DIM,
-)
-from record_csv import CSV_DIR, next_csv_path, CHANNELS as REC_CHANNELS
+# 重用既有模組的路徑與函式
+from record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
+from fft_energy import BASE_DIR, CHANNELS, load_eeg
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PY = sys.executable                       # 目前的 venv python
+EI_DIR = os.path.join(BASE_DIR, "EI")
+FFT_DIR = os.path.join(BASE_DIR, "FFT")
 
+# ANSI
+BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
+CYAN = "\033[36m"; GREEN = "\033[32m"; YELLOW = "\033[33m"; RED = "\033[31m"
 
-class LiveRecorder:
-    """單一 BLE 回呼：同時餵給即時畫面（Monitor）並把樣本寫入 CSV。"""
-
-    def __init__(self, mon, writer):
-        self.mon = mon
-        self.writer = writer
-        self.count = 0
-
-    def on_eeg(self, data, timestamps):
-        # data 形狀 (5, 12)：先更新即時畫面緩衝，再寫入前 4 個通道（不含 AUX）
-        self.mon.on_eeg(data, timestamps)
-        n_ch = len(REC_CHANNELS)
-        for i in range(data.shape[1]):
-            self.writer.writerow(
-                [f"{timestamps[i]:.6f}"]
-                + [f"{data[ch, i]:.3f}" for ch in range(n_ch)]
-            )
-            self.count += 1
+# 目前選定的裝置（供 monitor/record/main 重用；未設定則各腳本自行掃描）
+state = {"address": None, "name": None}
 
 
-def resolve_address(args):
-    if args.address:
-        return args.address, (args.name or "Muse")
-    print("掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...")
+# ---------- 小工具 ----------
+def clear():
+    # 2J 清畫面、3J 清捲動歷史(scrollback)、H 游標回左上 -> 只保留當下這一頁
+    print("\033[2J\033[3J\033[H", end="")
+
+
+def pause():
+    try:
+        input(f"\n{DIM}按 Enter 返回選單...{RESET}")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
+def ask(prompt, default=None):
+    try:
+        s = input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return default
+    return s if s else default
+
+
+def run_script(script, *args):
+    """以子程序執行專案內腳本，繼承終端機（即時 UI 正常）。"""
+    cmd = [PY, os.path.join(BASE_DIR, script), *[a for a in args if a is not None]]
+    print(f"{DIM}$ {' '.join(cmd)}{RESET}\n")
+    try:
+        subprocess.run(cmd)
+    except KeyboardInterrupt:
+        print(f"\n{YELLOW}已中斷，返回選單。{RESET}")
+
+
+def device_args():
+    if state["address"]:
+        return ["--address", state["address"]]
+    return []
+
+
+def list_recordings():
+    """回傳 Data/ 內的 <編號>.csv 檔名，依編號排序。"""
+    if not os.path.isdir(CSV_DIR):
+        return []
+    files = [f for f in os.listdir(CSV_DIR) if re.match(r"^\d+\.csv$", f)]
+    return sorted(files, key=lambda x: int(x[:-4]))
+
+
+def count_rows(path):
+    with open(path) as f:
+        return sum(1 for _ in f) - 1  # 扣掉表頭
+
+
+def choose_recording(prompt_default_last=True):
+    """列出錄製檔讓使用者選；Enter 預設選最後（最新）一個。回傳完整路徑或 None。"""
+    files = list_recordings()
+    if not files:
+        print(f"{YELLOW}Data/ 內沒有任何錄製檔（<編號>.csv）。先錄一段吧。{RESET}")
+        return None
+    print(f"{BOLD}Data/ 內的錄製檔：{RESET}")
+    for i, f in enumerate(files):
+        n = count_rows(os.path.join(CSV_DIR, f))
+        print(f"  [{i}] {f:<10} 約 {n/256:6.1f} 秒 （{n} 樣本）")
+    default = files[-1] if prompt_default_last else None
+    sel = ask(f"選擇編號（Enter = 最新 {default}）：", default="__last__")
+    if sel == "__last__":
+        return os.path.join(CSV_DIR, files[-1])
+    if sel is None:
+        return None
+    if sel.isdigit() and int(sel) < len(files):
+        return os.path.join(CSV_DIR, files[int(sel)])
+    print(f"{RED}無效的選擇。{RESET}")
+    return None
+
+
+# ---------- 各功能 ----------
+def do_scan():
+    from muselsl import list_muses
+    print(f"{CYAN}掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...{RESET}")
     muses = list_muses(backend="bleak")
     if not muses:
-        sys.exit("找不到 MUSE 裝置。先執行 ./venv/bin/python list_devices.py 排查。")
-    print(f"使用裝置：{muses[0]['name']}  [{muses[0]['address']}]")
-    return muses[0]["address"], muses[0]["name"]
+        print(f"{RED}找不到任何 MUSE 裝置。{RESET}")
+        return
+    print(f"\n找到 {len(muses)} 台：")
+    for i, m in enumerate(muses):
+        print(f"  [{i}] {m['name']:<18} {m['address']}")
+    sel = ask("要把哪一台設為「目前裝置」？輸入編號（Enter 跳過）：")
+    if sel and sel.isdigit() and int(sel) < len(muses):
+        m = muses[int(sel)]
+        state["address"], state["name"] = m["address"], m["name"]
+        print(f"{GREEN}已設定目前裝置：{m['name']} [{m['address']}]{RESET}")
 
 
-def run_analysis(csv_path):
-    """依序執行 FFT 與 EI 分析（沿用既有腳本，輸出到 FFT/ 與 EI/）。"""
-    py = sys.executable  # 目前的 venv python
-    # 先 flush 再叫子程序，確保標題印在子程序輸出「之前」（輸出被導向檔案時尤其重要）
-    print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT（fft_energy.py）==={RESET}", flush=True)
-    subprocess.run([py, os.path.join(BASE_DIR, "fft_energy.py"), csv_path])
-    print(f"\n{BOLD}{CYAN}=== 步驟 3：專注度指數 EI（engagement.py）==={RESET}", flush=True)
-    subprocess.run([py, os.path.join(BASE_DIR, "engagement.py"), csv_path])
+def do_monitor():
+    run_script("monitor_raw.py", *device_args())
+
+
+def do_record():
+    secs = ask("要錄幾秒？（Enter = 一直錄到 Ctrl+C）：", default="0")
+    run_script("record_csv.py", *device_args(), "--seconds", secs)
+
+
+def do_pipeline():
+    secs = ask("一鍵流程要錄幾秒？（建議 ≥10；Enter = 錄到 Ctrl+C）：", default="0")
+    run_script("Overall_process.py", *device_args(), "--seconds", secs)
+
+
+def do_fft():
+    path = choose_recording()
+    if path:
+        run_script("fft_energy.py", path)
+
+
+def do_ei():
+    path = choose_recording()
+    if path:
+        run_script("engagement.py", path)
+
+
+def do_clean():
+    # clean_csv.py 內含 y/N 確認，直接交給它
+    run_script("clean_csv.py")
+
+
+# ---------- 查看數據 ----------
+def view_recording_stats():
+    path = choose_recording()
+    if not path:
+        return
+    try:
+        data = load_eeg(path)
+    except SystemExit as e:
+        print(f"{RED}{e}{RESET}")
+        return
+    n = len(data)
+    print(f"\n{BOLD}{os.path.basename(path)}{RESET}：{n} 樣本，約 {n/256:.1f} 秒")
+    print(f"{DIM}通道      平均      RMS(交流)     最小      最大{RESET}")
+    for c, ch in enumerate(CHANNELS):
+        col = data[:, c]
+        rms = float(np.sqrt(np.mean((col - col.mean()) ** 2)))
+        print(f"  {ch:<5} {col.mean():9.1f} {rms:10.1f} {col.min():9.1f} {col.max():9.1f}")
+    print(f"{DIM}（單位 µV。RMS 太大通常代表未配戴或電極接觸不良）{RESET}")
+
+
+def view_ei_result():
+    files = [f for f in os.listdir(EI_DIR) if re.match(r"^\d+\.csv$", f)] if os.path.isdir(EI_DIR) else []
+    if not files:
+        print(f"{YELLOW}EI/ 內沒有結果。先對某個錄製檔跑「算 EI」。{RESET}")
+        return
+    files.sort(key=lambda x: int(x[:-4]))
+    print(f"{BOLD}EI/ 內的結果：{RESET} " + ", ".join(files))
+    stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
+    path = os.path.join(EI_DIR, f"{stem}.csv")
+    if not os.path.exists(path):
+        print(f"{RED}找不到 {path}{RESET}")
+        return
+    import csv as _csv
+    secs, eis, smooths = [], [], []
+    with open(path) as f:
+        r = _csv.reader(f)
+        next(r)
+        for row in r:
+            if not row:
+                continue
+            secs.append(int(row[0]))
+            eis.append(float(row[1]) if row[1] else float("nan"))
+            smooths.append(float(row[2]) if len(row) > 2 and row[2] else float("nan"))
+    print(f"\n{BOLD}{'秒':>3}  {'EI(每秒)':>10}  {'穩定EI(10秒平均)':>16}{RESET}")
+    for s, e, sm in zip(secs, eis, smooths):
+        e_str = "nan" if np.isnan(e) else f"{e:.4f}"
+        sm_str = f"{sm:.4f}" if not np.isnan(sm) else f"{DIM}—{RESET}"
+        print(f"{s:>3}  {e_str:>10}  {sm_str:>16}")
+    valid = [v for v in smooths if not np.isnan(v)]
+    if valid:
+        print(f"\n{GREEN}穩定分數 {len(valid)} 個，平均 = {np.mean(valid):.4f}，"
+              f"最新 = {valid[-1]:.4f}{RESET}")
+    else:
+        print(f"{YELLOW}此段未滿 10 秒，沒有穩定分數。{RESET}")
+
+
+def view_fft_peaks():
+    stem = None
+    # 以 TP9 資料夾判斷有哪些編號
+    tp9 = os.path.join(FFT_DIR, "TP9")
+    files = [f for f in os.listdir(tp9) if re.match(r"^\d+\.csv$", f)] if os.path.isdir(tp9) else []
+    if not files:
+        print(f"{YELLOW}FFT/ 內沒有結果。先對某個錄製檔跑「做 FFT」。{RESET}")
+        return
+    files.sort(key=lambda x: int(x[:-4]))
+    print(f"{BOLD}FFT/ 內的結果編號：{RESET} " + ", ".join(f[:-4] for f in files))
+    stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
+    print(f"\n{BOLD}各通道整段平均下的主頻與頻帶能量（µV²）{RESET}")
+    print(f"{DIM}通道     主頻    θ(4-8)   α(8-12)  β(13-30){RESET}")
+    for ch in CHANNELS:
+        path = os.path.join(FFT_DIR, ch, f"{stem}.csv")
+        if not os.path.exists(path):
+            print(f"  {ch:<5} {RED}(缺檔){RESET}")
+            continue
+        arr = np.genfromtxt(path, delimiter=",", skip_header=1)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+        # 欄 0 = second；欄 1..128 = 1..128 Hz
+        mean_e = arr[:, 1:].mean(axis=0)          # 長度 128，索引 i -> (i+1) Hz
+        peak_hz = int(np.argmax(mean_e)) + 1
+        theta = mean_e[3:7].sum()                  # 4..7 Hz
+        alpha = mean_e[7:12].sum()                 # 8..12 Hz
+        beta = mean_e[12:30].sum()                 # 13..30 Hz
+        print(f"  {ch:<5} {peak_hz:4d}Hz {theta:9.0f} {alpha:9.0f} {beta:9.0f}")
+    print(f"{DIM}（主頻若在 60 Hz 附近多為市電干擾/接觸不良；正常 EEG 多集中在低頻）{RESET}")
+
+
+def do_view_data():
+    while True:
+        clear()
+        print(f"{BOLD}{CYAN}== 查看數據 =={RESET}\n")
+        recs = list_recordings()
+        print(f"目前 Data/ 有 {len(recs)} 個錄製檔"
+              + ("： " + ", ".join(r[:-4] for r in recs) if recs else "（無）") + "\n")
+        print("  [1] 錄製檔訊號摘要（每通道 平均/RMS/最小/最大）")
+        print("  [2] 查看 EI 專注度結果")
+        print("  [3] 查看 FFT 主頻與頻帶能量")
+        print("  [0] 返回主選單")
+        c = ask("\n請選擇：")
+        if c == "1":
+            clear(); view_recording_stats(); pause()
+        elif c == "2":
+            clear(); view_ei_result(); pause()
+        elif c == "3":
+            clear(); view_fft_peaks(); pause()
+        elif c in ("0", None, "q"):
+            return
+        else:
+            print(f"{RED}無效選擇。{RESET}"); pause()
+
+
+# ---------- 主選單 ----------
+MENU = f"""{BOLD}{CYAN}============================================
+        MUSE 2 EEG 控制台
+============================================{RESET}
+ 目前裝置：{{device}}
+
+ {BOLD}擷取 / 監控{RESET}
+   [1] 掃描並選擇 MUSE 裝置
+   [2] 即時監控原始 EEG
+   [3] 錄製資料到 Data/
+   [4] 一鍵流程：監控+錄製 → FFT → EI  {DIM}(★推薦){RESET}
+
+ {BOLD}分析{RESET}
+   [5] 對錄製檔做每秒 FFT（輸出 FFT/）
+   [6] 對錄製檔算專注度 EI（輸出 EI/）
+
+ {BOLD}查看 / 管理{RESET}
+   [7] 查看數據（訊號摘要 / EI 結果 / FFT 主頻）
+   [8] 刪除專案內所有 CSV
+   [0] 離開
+{DIM}--------------------------------------------{RESET}"""
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="MUSE 2 一鍵：即時監控 + 錄製 CSV → FFT → EI 專注度"
-    )
-    ap.add_argument("--address", help="MUSE 的 BLE address（省略則自動掃描）")
-    ap.add_argument("--name", help="裝置名稱（可選）")
-    ap.add_argument("--seconds", type=float, default=0, help="錄製秒數（0=直到 Ctrl+C）")
-    ap.add_argument("--fps", type=float, default=15.0, help="即時畫面刷新率（預設 15）")
-    ap.add_argument("--window", type=float, default=2.0, help="即時統計/波形視窗秒數（預設 2）")
-    ap.add_argument("--retries", type=int, default=3, help="連線重試次數（預設 3）")
-    ap.add_argument("--aux", action="store_true", help="即時畫面顯示 AUX（預設隱藏）")
-    ap.add_argument("--no-analyze", action="store_true", help="只監控+錄製，不做 FFT/EI")
-    args = ap.parse_args()
-
-    show_idx = list(range(5)) if args.aux else [0, 1, 2, 3]
-    address, name = resolve_address(args)
-
-    # 準備輸出 CSV：Data/<下一個未使用編號>.csv
-    out_path = next_csv_path(CSV_DIR)
-    f = open(out_path, "w", newline="")
-    writer = csv.writer(f)
-    writer.writerow(["timestamp"] + REC_CHANNELS)
-
-    mon = Monitor(window_sec=args.window)
-    rec = LiveRecorder(mon, writer)
-
-    muse = Muse(address=address, name=name, callback_eeg=rec.on_eeg, backend="bleak")
-    print(f"連線中 {name} [{address}] ...")
-    if not muse.connect(retries=args.retries):
-        f.close()
-        os.remove(out_path)  # 連線失敗就不留空檔
-        sys.exit("連線失敗。請確認頭帶未被手機 App 佔用，且在附近。")
-    muse.start()
-
-    limit = args.seconds
-    hint = f"錄製 {limit:.0f} 秒" if limit else "錄製中，按 Ctrl+C 停止"
-    print(f"開始 -> {out_path}（{hint}）")
-
-    sys.stdout.write(CLEAR + HIDE_CURSOR)
-    period = 1.0 / max(args.fps, 1.0)
-    t0 = time.time()
-    try:
-        while True:
-            # backends.sleep 會推動 asyncio 事件迴圈 -> 觸發 BLE 資料回呼
-            backends.sleep(period)
-            render(mon, name, address, show_idx)
-            if limit and (time.time() - t0) >= limit:
-                break
-    except KeyboardInterrupt:
-        pass
-    finally:
-        sys.stdout.write(SHOW_CURSOR + RESET + "\n")
+    actions = {
+        "1": do_scan, "2": do_monitor, "3": do_record, "4": do_pipeline,
+        "5": do_fft, "6": do_ei, "7": do_view_data, "8": do_clean,
+    }
+    while True:
+        clear()
+        dev = (f"{GREEN}{state['name']} [{state['address']}]{RESET}"
+               if state["address"] else f"{DIM}未設定（執行時自動掃描）{RESET}")
+        print(MENU.format(device=dev))
         try:
-            muse.stop()
-            muse.disconnect()
-        except Exception:
-            pass
-        f.close()
-
-    secs = rec.count / 256.0
-    print(f"已停止串流。錄製檔：{out_path}"
-          f"（共 {rec.count} 個樣本，約 {secs:.1f} 秒）")
-
-    if args.no_analyze:
-        print(f"{DIM}（--no-analyze：略過 FFT/EI 分析）{RESET}")
-        return
-    if rec.count < 256:
-        print(f"{DIM}資料不足 1 秒，略過 FFT/EI 分析。{RESET}")
-        return
-
-    run_analysis(out_path)
-    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → FFT（FFT/）→ EI（EI/）")
-    if secs < 10:
-        print(f"{DIM}提醒：此段只有約 {secs:.0f} 秒，未滿 10 秒故無「穩定 EI」；"
-              f"想看平滑專注度請錄 10 秒以上。{RESET}")
+            choice = input("請選擇功能編號：").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n再見！")
+            return
+        if choice in ("0", "q", "quit", "exit"):
+            print("再見！")
+            return
+        action = actions.get(choice)
+        if not action:
+            print(f"{RED}無效選擇：{choice}{RESET}"); pause(); continue
+        clear()             # 每個功能都獨佔一頁，不把主選單留在上面
+        try:
+            action()
+        except KeyboardInterrupt:
+            print(f"\n{YELLOW}已中斷，返回選單。{RESET}")
+        if choice != "7":   # 查看數據子選單自己有暫停
+            pause()
 
 
 if __name__ == "__main__":
