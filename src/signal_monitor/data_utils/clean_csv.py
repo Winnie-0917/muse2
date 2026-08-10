@@ -24,8 +24,12 @@
 """
 import argparse
 import os
+import re
+import shutil
 import sys
 
+from signal_monitor.analysis import engagement, faa
+from signal_monitor.overall_process import combine_ei_faa_outputs
 from signal_monitor.paths import PROJECT_ROOT
 
 BASE_DIR = PROJECT_ROOT
@@ -50,6 +54,70 @@ def human_size(n):
         if n < 1024 or unit == "GB":
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024
+
+
+def regenerate_ei_faa_outputs(base_dir=None):
+    """刪除並重建 EI / FAA / Features 輸出（含眨眼/BPM），並用最新錄製檔生成。"""
+    base_dir = base_dir or PROJECT_ROOT
+    data_dir = os.path.join(base_dir, "Data")
+    if not os.path.isdir(data_dir):
+        return []
+
+    files = [
+        f for f in os.listdir(data_dir)
+        if re.match(r"^\d+\.csv$", f)
+    ]
+    if not files:
+        return []
+
+    latest_file = sorted(files, key=lambda x: int(x[:-4]))[-1]
+    latest_path = os.path.join(data_dir, latest_file)
+    stem = re.sub(r"\.csv$", "", latest_file)
+
+    for rel_dir in ("EI", "FAA", "Features"):
+        out_dir = os.path.join(base_dir, rel_dir)
+        if os.path.isdir(out_dir):
+            shutil.rmtree(out_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        open(os.path.join(out_dir, ".gitkeep"), "a").close()
+
+    import signal_monitor.analysis.fft_energy as fft_energy
+
+    original = {
+        "fft_base": fft_energy.BASE_DIR,
+        "fft_csv": fft_energy.CSV_DIR,
+        "eng_base": engagement.BASE_DIR,
+        "eng_csv": engagement.CSV_DIR,
+        "faa_base": faa.BASE_DIR,
+        "faa_csv": faa.CSV_DIR,
+    }
+    try:
+        fft_energy.BASE_DIR = base_dir
+        fft_energy.CSV_DIR = os.path.join(base_dir, "Data")
+        engagement.BASE_DIR = base_dir
+        engagement.CSV_DIR = os.path.join(base_dir, "Data")
+        faa.BASE_DIR = base_dir
+        faa.CSV_DIR = os.path.join(base_dir, "Data")
+        old_argv = sys.argv[:]
+        sys.argv = ["engagement", latest_path]
+        engagement.main()
+        sys.argv = ["faa", latest_path]
+        faa.main()
+        sys.argv = old_argv
+    finally:
+        fft_energy.BASE_DIR = original["fft_base"]
+        fft_energy.CSV_DIR = original["fft_csv"]
+        engagement.BASE_DIR = original["eng_base"]
+        engagement.CSV_DIR = original["eng_csv"]
+        faa.BASE_DIR = original["faa_base"]
+        faa.CSV_DIR = original["faa_csv"]
+    ei_path = os.path.join(base_dir, "EI", f"{stem}.csv")
+    faa_path = os.path.join(base_dir, "FAA", f"{stem}.csv")
+    features_path = os.path.join(base_dir, "Features", f"{stem}.csv")
+    if os.path.exists(ei_path) and os.path.exists(faa_path):
+        combine_ei_faa_outputs(ei_path, faa_path, features_path, source_csv_path=latest_path)
+
+    return [ei_path, faa_path, features_path]
 
 
 def main():
@@ -93,6 +161,12 @@ def main():
 
     print(f"\n完成：已刪除 {deleted} 個檔案" + (f"，{failed} 個失敗。" if failed else "。"))
     print("（資料夾與 .gitkeep 保留，結構不變。）")
+
+    regenerated = regenerate_ei_faa_outputs(BASE_DIR)
+    if regenerated:
+        print(f"已重新生成分析結果：{', '.join(os.path.relpath(p, BASE_DIR) for p in regenerated)}")
+    else:
+        print("目前沒有可重建的錄製檔，EI / FAA / Features 暫未生成。")
 
 
 if __name__ == "__main__":

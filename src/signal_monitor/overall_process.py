@@ -8,8 +8,9 @@
       - 終端機即時顯示原始 EEG（4 通道波形 / RMS / 訊號品質 / 取樣率）
       - 同一份資料逐一樣本寫入 Data/<編號>.csv
   步驟 2：停止後自動對該檔跑 fft_energy.py（每秒 FFT → FFT/<通道>/<編號>.csv）
-  步驟 3：再跑 engagement.py（每秒 EI + 10 秒滑動平均 → EI/<編號>.csv）
-  步驟 4：再跑 faa.py（每秒 FAA + 10 秒滑動平均 → FAA/<編號>.csv）
+    步驟 3：再跑 engagement.py（每秒 EI + 10 秒滑動平均 → EI/<編號>.csv）
+    步驟 4：再跑 faa.py（每秒 FAA + 10 秒滑動平均 → FAA/<編號>.csv）
+    步驟 5：以 AF7 即時計算每秒眨眼數與 10 秒滑動 BPM，直接併入 Features/<編號>.csv
 
 停止錄製的方式：--seconds 到時自動停，或隨時按 Ctrl+C。
 
@@ -25,6 +26,7 @@
 import argparse
 import csv
 import os
+import re
 import subprocess
 import sys
 import time
@@ -38,6 +40,10 @@ from signal_monitor.hardware.monitor_raw import (
     CLEAR, HIDE_CURSOR, SHOW_CURSOR, RESET, BOLD, CYAN, DIM,
 )
 from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path, CHANNELS as REC_CHANNELS
+from signal_monitor.paths import PROJECT_ROOT
+from signal_monitor.analysis.blink import build_blink_lookup
+
+FEATURES_DIR = os.path.join(PROJECT_ROOT, "Features")
 
 
 class LiveRecorder:
@@ -71,8 +77,60 @@ def resolve_address(args):
     return muses[0]["address"], muses[0]["name"]
 
 
+def combine_ei_faa_outputs(ei_path, faa_path, out_path, source_csv_path=None):
+    """把 EI / FAA（含眨眼與 BPM）合併到同一個 CSV，輸出到 Features/。"""
+    with open(ei_path, newline="") as f:
+        ei_rows = list(csv.reader(f))
+    with open(faa_path, newline="") as f:
+        faa_rows = list(csv.reader(f))
+
+    if len(ei_rows) < 2 or len(faa_rows) < 2:
+        raise ValueError(f"缺少資料內容：{ei_path} 或 {faa_path}")
+
+    ei_header = ei_rows[0]
+    faa_header = faa_rows[0]
+    ei_value_idx = ei_header.index("EI")
+    ei_smooth_idx = ei_header.index(next(col for col in ei_header if col.startswith("EI_smooth")))
+    faa_value_idx = faa_header.index("FAA")
+    faa_smooth_idx = faa_header.index(next(col for col in faa_header if col.startswith("FAA_smooth")))
+
+    ei_lookup = {
+        row[ei_header.index("second")]: row[ei_value_idx:ei_smooth_idx + 1]
+        for row in ei_rows[1:]
+        if row and row[ei_header.index("second")]
+    }
+    faa_lookup = {
+        row[faa_header.index("second")]: row[faa_value_idx:faa_smooth_idx + 1]
+        for row in faa_rows[1:]
+        if row and row[faa_header.index("second")]
+    }
+
+    def second_sort_key(value):
+        try:
+            return (0, int(value))
+        except ValueError:
+            return (1, value)
+
+    blink_lookup = {}
+    blink_smooth_name = "BPM_smooth10"
+    if source_csv_path and os.path.exists(source_csv_path):
+        blink_lookup, blink_smooth_name = build_blink_lookup(source_csv_path)
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "second", "EI", ei_header[ei_smooth_idx],
+            "FAA", faa_header[faa_smooth_idx],
+            "blinks", blink_smooth_name,
+        ])
+        for second in sorted(set(ei_lookup) & set(faa_lookup), key=second_sort_key):
+            blink_values = blink_lookup.get(second, ["", ""])
+            writer.writerow([second, *ei_lookup[second], *faa_lookup[second], *blink_values])
+
+
 def run_analysis(csv_path):
-    """依序執行 FFT、EI、FAA 分析（沿用既有模組，輸出到 FFT/、EI/、FAA/）。"""
+    """依序執行 FFT、EI、FAA 分析，並合併為 Features/<編號>.csv（含眨眼/BPM）。"""
     py = sys.executable  # 目前的 venv python
     # 先 flush 再叫子程序，確保標題印在子程序輸出「之前」（輸出被導向檔案時尤其重要）
     print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT（fft_energy）==={RESET}", flush=True)
@@ -81,6 +139,14 @@ def run_analysis(csv_path):
     subprocess.run([py, "-m", "signal_monitor.analysis.engagement", csv_path])
     print(f"\n{BOLD}{CYAN}=== 步驟 4：前額 alpha 不對稱 FAA（faa）==={RESET}", flush=True)
     subprocess.run([py, "-m", "signal_monitor.analysis.faa", csv_path])
+    print(f"\n{BOLD}{CYAN}=== 步驟 5：AF7 眨眼偵測（併入 Features）==={RESET}", flush=True)
+
+    stem = re.sub(r"\.csv$", "", os.path.basename(csv_path))
+    ei_path = os.path.join(PROJECT_ROOT, "EI", f"{stem}.csv")
+    faa_path = os.path.join(PROJECT_ROOT, "FAA", f"{stem}.csv")
+    features_path = os.path.join(FEATURES_DIR, f"{stem}.csv")
+    combine_ei_faa_outputs(ei_path, faa_path, features_path, source_csv_path=csv_path)
+    print(f"\n{BOLD}{CYAN}已合併輸出 Features CSV：{features_path}{RESET}")
 
 
 def main():
@@ -155,7 +221,7 @@ def main():
         return
 
     run_analysis(out_path)
-    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → FFT（FFT/）→ EI（EI/）→ FAA（FAA/）")
+    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → FFT（FFT/）→ EI（EI/）→ FAA（FAA/）→ Features（含 Blink/BPM）")
     if secs < 10:
         print(f"{DIM}提醒：此段只有約 {secs:.0f} 秒，未滿 10 秒故無「穩定 EI」；"
               f"想看平滑專注度請錄 10 秒以上。{RESET}")

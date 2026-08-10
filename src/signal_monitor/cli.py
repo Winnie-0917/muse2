@@ -3,7 +3,7 @@
 MUSE 2 EEG 互動式控制台（終端機選單）。
 
 把整個流程整合到一個介面：掃描裝置、即時監控、錄製、一鍵流程（監控+錄製→FFT→EI）、
-單獨做 FFT / EI，以及「查看數據」（列出錄製檔、訊號摘要、EI 結果、FFT 主頻）與清除資料。
+單獨做 FFT / EI/FAA（含眨眼BPM併入 Features），以及「查看數據」（列出錄製檔、訊號摘要、EI 結果、FFT 主頻）與清除資料。
 
 擷取/監控類功能會以子程序呼叫既有模組（python -m signal_monitor.hardware.monitor_raw /
 …record_csv / …overall_process …），這樣即時畫面能正常顯示；查看數據則直接讀
@@ -22,11 +22,13 @@ import numpy as np
 # 重用既有模組的路徑與函式
 from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
 from signal_monitor.analysis.fft_energy import BASE_DIR, CHANNELS, load_eeg
+from signal_monitor.overall_process import combine_ei_faa_outputs
 
 PY = sys.executable                       # 目前的 venv python
 EI_DIR = os.path.join(BASE_DIR, "EI")
 FFT_DIR = os.path.join(BASE_DIR, "FFT")
 FAA_DIR = os.path.join(BASE_DIR, "FAA")
+FEATURES_DIR = os.path.join(BASE_DIR, "Features")
 
 # ANSI
 BOLD = "\033[1m"; DIM = "\033[2m"; RESET = "\033[0m"
@@ -65,6 +67,35 @@ def run_module(module, *args):
         subprocess.run(cmd)
     except KeyboardInterrupt:
         print(f"\n{YELLOW}已中斷，返回選單。{RESET}")
+
+
+def sort_features_csv_by_second(path):
+    """保險重排：確保 Features CSV 以 second 數值遞增。"""
+    import csv
+
+    if not os.path.exists(path):
+        return
+    with open(path, newline="") as f:
+        rows = list(csv.reader(f))
+    if len(rows) <= 1:
+        return
+
+    header = rows[0]
+    body = [r for r in rows[1:] if r]
+    second_idx = header.index("second")
+
+    def key_fn(row):
+        value = row[second_idx]
+        try:
+            return (0, int(value))
+        except ValueError:
+            return (1, value)
+
+    body.sort(key=key_fn)
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(body)
 
 
 def device_args():
@@ -148,9 +179,24 @@ def do_fft():
 
 def do_ei():
     path = choose_recording()
-    if path:
-        run_module("signal_monitor.analysis.engagement", path)
-        run_module("signal_monitor.analysis.faa", path)
+    if not path:
+        return
+
+    run_module("signal_monitor.analysis.engagement", path)
+    run_module("signal_monitor.analysis.faa", path)
+
+    stem = re.sub(r"\.csv$", "", os.path.basename(path))
+    ei_path = os.path.join(EI_DIR, f"{stem}.csv")
+    faa_path = os.path.join(FAA_DIR, f"{stem}.csv")
+    features_path = os.path.join(FEATURES_DIR, f"{stem}.csv")
+
+    if not (os.path.exists(ei_path) and os.path.exists(faa_path)):
+        print(f"{YELLOW}EI/ 或 FAA/ 尚未產生完整結果，跳過 Features 合併。{RESET}")
+        return
+
+    combine_ei_faa_outputs(ei_path, faa_path, features_path, source_csv_path=path)
+    sort_features_csv_by_second(features_path)
+    print(f"{GREEN}已輸出合併結果至 {features_path}{RESET}")
 
 
 def do_clean():
@@ -401,7 +447,7 @@ MENU = f"""{BOLD}{CYAN}============================================
 
  {BOLD}分析{RESET}
    [5] 對錄製檔做每秒 FFT（輸出 FFT/）
-   [6] 對錄製檔算 EI + FAA（輸出 EI/、FAA/）
+    [6] 對錄製檔算 EI + FAA（眨眼/BPM 併入 Features）
 
  {BOLD}查看 / 管理{RESET}
    [7] 查看數據（訊號摘要 / EI / FFT / FAA）

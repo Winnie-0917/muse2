@@ -125,7 +125,50 @@ $$\Large FAA = \ln(\alpha_{AF8}) - \ln(\alpha_{AF7})$$
 
 ---
 
-## 六、專案結構與檔案說明
+## 六、眨眼每分鐘頻率（Blinks Per Minute, BPM）
+
+### 1. 訊號預處理（去除直流偏移與取絕對值）
+
+將原始訊號減去平均值，並取絕對值，得到處理後的新序列 $y[n]$：
+
+&nbsp;
+
+$$\Large y[n] = \vert{}x[n] - \mu\vert{}$$
+
+&nbsp;
+
+### 2. 振幅門檻（Threshold）
+
+設定AF7感測器 $100\ \mu V$ 條件。該點的電壓絕對值必須大於或等於 100：
+
+&nbsp;
+
+$$\Large y[n] \ge 100 \mu V$$
+
+&nbsp;
+
+### 3. 最小距離限制（Minimum Distance Constraint）
+
+為了防止「慢眨眼被誤判成 2 次」，我們加入了冷卻距離 $D$。假設 $f_s$ 是取樣率（256 Hz），我們將冷卻時間設為 0.5 秒，則距離參數 $D = 0.5 \times f_s = 128$ 個採樣點。
+
+&nbsp;
+$$\Large \forall n, m \in P \ (n \neq m), \quad \vert{}n - m\vert{} \ge D$$
+&nbsp;
+
+## 六、模型訓練
+```bash
+python Model/predict_model.py Features/1.csv
+```
+### 設計「絕對無聊」任務（標籤 $y=0$）：
+讓受測者盯著螢幕上一個緩慢移動的白點長達 5 分鐘。
+
+### 設計「絕對不無聊」任務（標籤 $y=1$）：
+讓受測者玩一款極度需要反應速度的遊戲（如網頁版的節奏遊戲或俄羅斯方塊）5 分鐘。
+
+### 模型預測：
+直接把使用者操作 PDF 與操作 Learn8 時的 [EI, FAA, Blink] 丟進這個模型裡，讓模型自己吐出無聊度的機率。
+
+## 七、專案結構與檔案說明
 
 程式碼統一放在 `src/signal_monitor/` 套件內，輸出資料夾（`Data/`、`FFT/`、`EI/`、
 `FAA/`）維持在專案根目錄。
