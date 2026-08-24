@@ -3,11 +3,12 @@
 MUSE 2 EEG 互動式控制台（終端機選單）。
 
 把整個流程整合到一個介面：掃描裝置、即時監控、錄製、一鍵流程（監控+錄製→FFT→EI）、
-單獨做 FFT / EI/FAA（含眨眼BPM併入 Features），以及「查看數據」（列出錄製檔、訊號摘要、EI 結果、FFT 主頻）與清除資料。
+單獨做 FFT（只顯示）/ EI+FAA+眨眼（只輸出 Features/），以及「查看數據」（列出錄製檔、訊號摘要、
+EI / FAA 結果、FFT 主頻）與清除資料。
 
 擷取/監控類功能會以子程序呼叫既有模組（python -m signal_monitor.hardware.monitor_raw /
 …record_csv / …overall_process …），這樣即時畫面能正常顯示；查看數據則直接讀
-Data/、EI/、FFT/ 內的 CSV 算給你看。
+Data/ 與 Features/ 內的 CSV 算給你看。
 
 用法:
     python -m signal_monitor
@@ -15,19 +16,19 @@ Data/、EI/、FFT/ 內的 CSV 算給你看。
 import os
 import re
 import subprocess
+import traceback
 import sys
 
 import numpy as np
 
 # 重用既有模組的路徑與函式
 from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
-from signal_monitor.analysis.fft_energy import BASE_DIR, CHANNELS, load_eeg
-from signal_monitor.overall_process import combine_ei_faa_outputs
+from signal_monitor.analysis.fft_energy import (
+    BASE_DIR, CHANNELS, load_eeg, per_second_energy,
+)
+from signal_monitor.analysis.features import build_features_csv
 
 PY = sys.executable                       # 目前的 venv python
-EI_DIR = os.path.join(BASE_DIR, "EI")
-FFT_DIR = os.path.join(BASE_DIR, "FFT")
-FAA_DIR = os.path.join(BASE_DIR, "FAA")
 FEATURES_DIR = os.path.join(BASE_DIR, "Features")
 
 # ANSI
@@ -64,9 +65,14 @@ def run_module(module, *args):
     cmd = [PY, "-m", module, *[a for a in args if a is not None]]
     print(f"{DIM}$ {' '.join(cmd)}{RESET}\n")
     try:
-        subprocess.run(cmd)
+        result = subprocess.run(cmd)
     except KeyboardInterrupt:
         print(f"\n{YELLOW}已中斷，返回選單。{RESET}")
+        return None
+    if result.returncode != 0:
+        print(f"\n{YELLOW}{module} 以非零狀態結束（{result.returncode}），"
+              f"後續步驟的結果可能不完整。{RESET}")
+    return result.returncode
 
 
 def sort_features_csv_by_second(path):
@@ -141,11 +147,14 @@ def choose_recording(prompt_default_last=True):
 
 # ---------- 各功能 ----------
 def do_scan():
-    from muselsl import list_muses
+    from signal_monitor.hardware.ble import NO_DEVICE_HINT, scan_muses
     print(f"{CYAN}掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...{RESET}")
-    muses = list_muses(backend="bleak")
+    muses, error = scan_muses()
+    if error:
+        print(f"{RED}掃描失敗：{error}{RESET}")
+        return
     if not muses:
-        print(f"{RED}找不到任何 MUSE 裝置。{RESET}")
+        print(f"{RED}{NO_DEVICE_HINT}{RESET}")
         return
     print(f"\n找到 {len(muses)} 台：")
     for i, m in enumerate(muses):
@@ -178,25 +187,26 @@ def do_fft():
 
 
 def do_ei():
+    """算 EI + FAA + 眨眼，只輸出 Features/<編號>.csv。
+
+    EI 與 FAA 直接在記憶體裡算完就併進 Features，不再各自落檔到 EI/ 與 FAA/。
+    """
     path = choose_recording()
     if not path:
         return
 
-    run_module("signal_monitor.analysis.engagement", path)
-    run_module("signal_monitor.analysis.faa", path)
-
     stem = re.sub(r"\.csv$", "", os.path.basename(path))
-    ei_path = os.path.join(EI_DIR, f"{stem}.csv")
-    faa_path = os.path.join(FAA_DIR, f"{stem}.csv")
     features_path = os.path.join(FEATURES_DIR, f"{stem}.csv")
 
-    if not (os.path.exists(ei_path) and os.path.exists(faa_path)):
-        print(f"{YELLOW}EI/ 或 FAA/ 尚未產生完整結果，跳過 Features 合併。{RESET}")
+    print(f"{CYAN}正在計算 EI / FAA / 眨眼…{RESET}")
+    try:
+        n_sec = build_features_csv(path, features_path)
+    except ValueError as exc:
+        print(f"{YELLOW}{exc}{RESET}")
         return
 
-    combine_ei_faa_outputs(ei_path, faa_path, features_path, source_csv_path=path)
     sort_features_csv_by_second(features_path)
-    print(f"{GREEN}已輸出合併結果至 {features_path}{RESET}")
+    print(f"{GREEN}已輸出 {n_sec} 秒的結果至 {features_path}{RESET}")
 
 
 def do_clean():
@@ -224,108 +234,113 @@ def view_recording_stats():
     print(f"{DIM}（單位 µV。RMS 太大通常代表未配戴或電極接觸不良）{RESET}")
 
 
-def view_ei_result():
-    files = [f for f in os.listdir(EI_DIR) if re.match(r"^\d+\.csv$", f)] if os.path.isdir(EI_DIR) else []
+def _read_features_column(path, metric):
+    """從 Features CSV 讀出 (秒, 每秒值, 平滑值) 三串。欄位以表頭名稱定位。"""
+    import csv as _csv
+    with open(path) as f:
+        rows = list(_csv.reader(f))
+    if len(rows) < 2:
+        return [], [], [], ""
+
+    header = rows[0]
+    raw_idx = header.index(metric)
+    smooth_name = next(c for c in header if c.startswith(f"{metric}_smooth"))
+    smooth_idx = header.index(smooth_name)
+
+    def num(row, i):
+        return float(row[i]) if i < len(row) and row[i] else float("nan")
+
+    secs, raws, smooths = [], [], []
+    for row in rows[1:]:
+        if not row or not row[0]:
+            continue
+        secs.append(int(row[0]))
+        raws.append(num(row, raw_idx))
+        smooths.append(num(row, smooth_idx))
+    return secs, raws, smooths, smooth_name
+
+
+def view_feature_metric(metric):
+    """查看 Features/ 內某個指標（EI 或 FAA）的逐秒結果。
+
+    EI 與 FAA 不再各自輸出到 EI/ 與 FAA/，兩者都併在 Features/<編號>.csv 裡，
+    所以這裡統一從 Features/ 讀。
+    """
+    files = [f for f in os.listdir(FEATURES_DIR) if re.match(r"^\d+\.csv$", f)] \
+        if os.path.isdir(FEATURES_DIR) else []
     if not files:
-        print(f"{YELLOW}EI/ 內沒有結果。先對某個錄製檔跑「算 EI」。{RESET}")
+        print(f"{YELLOW}Features/ 內沒有結果。先跑選單 [6] 對某個錄製檔算 EI + FAA。{RESET}")
         return
     files.sort(key=lambda x: int(x[:-4]))
-    print(f"{BOLD}EI/ 內的結果：{RESET} " + ", ".join(files))
+    print(f"{BOLD}Features/ 內的結果：{RESET} " + ", ".join(files))
     stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
-    path = os.path.join(EI_DIR, f"{stem}.csv")
+    path = os.path.join(FEATURES_DIR, f"{stem}.csv")
     if not os.path.exists(path):
         print(f"{RED}找不到 {path}{RESET}")
         return
-    import csv as _csv
-    secs, eis, smooths = [], [], []
-    with open(path) as f:
-        r = _csv.reader(f)
-        next(r)
-        for row in r:
-            if not row:
-                continue
-            secs.append(int(row[0]))
-            eis.append(float(row[1]) if row[1] else float("nan"))
-            smooths.append(float(row[2]) if len(row) > 2 and row[2] else float("nan"))
-    print(f"\n{BOLD}{'秒':>3}  {'EI(每秒)':>10}  {'穩定EI(10秒平均)':>16}{RESET}")
-    for s, e, sm in zip(secs, eis, smooths):
-        e_str = "nan" if np.isnan(e) else f"{e:.4f}"
-        sm_str = f"{sm:.4f}" if not np.isnan(sm) else f"{DIM}—{RESET}"
-        print(f"{s:>3}  {e_str:>10}  {sm_str:>16}")
+
+    try:
+        secs, raws, smooths, smooth_name = _read_features_column(path, metric)
+    except (ValueError, StopIteration):
+        print(f"{RED}{path} 內找不到 {metric} 欄位。{RESET}")
+        return
+    if not secs:
+        print(f"{YELLOW}{path} 沒有資料列。{RESET}")
+        return
+
+    signed = metric == "FAA"
+    fmt = "+.4f" if signed else ".4f"
+    window = smooth_name.replace(f"{metric}_smooth", "")
+    print(f"\n{BOLD}{'秒':>3}  {f'{metric}(每秒)':>10}  {f'穩定{metric}({window}秒平均)':>16}{RESET}")
+    for sec, raw, smooth in zip(secs, raws, smooths):
+        raw_str = "nan" if np.isnan(raw) else format(raw, fmt)
+        smooth_str = format(smooth, fmt) if not np.isnan(smooth) else f"{DIM}—{RESET}"
+        print(f"{sec:>3}  {raw_str:>10}  {smooth_str:>16}")
+
     valid = [v for v in smooths if not np.isnan(v)]
-    if valid:
-        print(f"\n{GREEN}穩定分數 {len(valid)} 個，平均 = {np.mean(valid):.4f}，"
-              f"最新 = {valid[-1]:.4f}{RESET}")
-    else:
-        print(f"{YELLOW}此段未滿 10 秒，沒有穩定分數。{RESET}")
+    if not valid:
+        print(f"{YELLOW}此段未滿 {window} 秒，沒有穩定分數。{RESET}")
+        return
+    avg = np.mean(valid)
+    extra = ""
+    if signed:
+        extra = "（偏正向/趨近）" if avg > 0 else "（偏負向/退縮）"
+    print(f"\n{GREEN}穩定分數 {len(valid)} 個，平均 = {format(avg, fmt)}{extra}，"
+          f"最新 = {format(valid[-1], fmt)}{RESET}")
+
+
+def view_ei_result():
+    view_feature_metric("EI")
 
 
 def view_faa_result():
-    files = [f for f in os.listdir(FAA_DIR) if re.match(r"^\d+\.csv$", f)] if os.path.isdir(FAA_DIR) else []
-    if not files:
-        print(f"{YELLOW}FAA/ 內沒有結果。先對某個錄製檔跑「算 FAA」（選單 [6]）。{RESET}")
-        return
-    files.sort(key=lambda x: int(x[:-4]))
-    print(f"{BOLD}FAA/ 內的結果：{RESET} " + ", ".join(files))
-    stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
-    path = os.path.join(FAA_DIR, f"{stem}.csv")
-    if not os.path.exists(path):
-        print(f"{RED}找不到 {path}{RESET}")
-        return
-    import csv as _csv
-    secs, faas, smooths = [], [], []
-    with open(path) as f:
-        r = _csv.reader(f)
-        next(r)
-        for row in r:
-            if not row:
-                continue
-            secs.append(int(row[0]))
-            faas.append(float(row[1]) if row[1] else float("nan"))
-            smooths.append(float(row[2]) if len(row) > 2 and row[2] else float("nan"))
-    print(f"\n{BOLD}{'秒':>3}  {'FAA(每秒)':>10}  {'穩定FAA(10秒平均)':>16}{RESET}")
-    for s, e, sm in zip(secs, faas, smooths):
-        e_str = "nan" if np.isnan(e) else f"{e:+.4f}"
-        sm_str = f"{sm:+.4f}" if not np.isnan(sm) else f"{DIM}—{RESET}"
-        print(f"{s:>3}  {e_str:>10}  {sm_str:>16}")
-    valid = [v for v in smooths if not np.isnan(v)]
-    if valid:
-        avg = np.mean(valid)
-        tone = "偏正向/趨近" if avg > 0 else "偏負向/退縮"
-        print(f"\n{GREEN}穩定分數 {len(valid)} 個，平均 = {avg:+.4f}（{tone}），"
-              f"最新 = {valid[-1]:+.4f}{RESET}")
-    else:
-        print(f"{YELLOW}此段未滿 10 秒，沒有穩定分數。{RESET}")
+    view_feature_metric("FAA")
 
 
 def view_fft_peaks():
-    stem = None
-    # 以 TP9 資料夾判斷有哪些編號
-    tp9 = os.path.join(FFT_DIR, "TP9")
-    files = [f for f in os.listdir(tp9) if re.match(r"^\d+\.csv$", f)] if os.path.isdir(tp9) else []
-    if not files:
-        print(f"{YELLOW}FFT/ 內沒有結果。先對某個錄製檔跑「做 FFT」。{RESET}")
+    """從錄製檔即時算出各通道的主頻與頻帶能量。
+
+    FFT 結果不再落檔到 FFT/ —— 它只是 EI / FAA 的中間產物，存起來又大又沒人讀。
+    要看的時候直接從 Data/<編號>.csv 重算，256 點的 FFT 很快。
+    """
+    path = choose_recording()
+    if not path:
         return
-    files.sort(key=lambda x: int(x[:-4]))
-    print(f"{BOLD}FFT/ 內的結果編號：{RESET} " + ", ".join(f[:-4] for f in files))
-    stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
-    print(f"\n{BOLD}各通道整段平均下的主頻與頻帶能量（µV²）{RESET}")
+
+    data = load_eeg(path)
+    fs = 256
+    n_sec = len(data) // fs
+    if n_sec == 0:
+        print(f"{YELLOW}{os.path.basename(path)} 資料不足 1 秒。{RESET}")
+        return
+
+    print(f"\n{BOLD}{os.path.basename(path)}　各通道整段平均下的主頻與頻帶能量（µV²）{RESET}")
     print(f"{DIM}通道     主頻    θ(4-8)   α(8-12)  β(13-30){RESET}")
-    for ch in CHANNELS:
-        path = os.path.join(FFT_DIR, ch, f"{stem}.csv")
-        if not os.path.exists(path):
-            print(f"  {ch:<5} {RED}(缺檔){RESET}")
-            continue
-        arr = np.genfromtxt(path, delimiter=",", skip_header=1)
-        if arr.ndim == 1:
-            arr = arr[None, :]
-        # 欄 0 = second；欄 1..128 = 1..128 Hz
-        mean_e = arr[:, 1:].mean(axis=0)          # 長度 128，索引 i -> (i+1) Hz
+    for c, ch in enumerate(CHANNELS):
+        mean_e = per_second_energy(data[:, c], fs)[:, 1:].mean(axis=0)  # 索引 i -> (i+1) Hz
         peak_hz = int(np.argmax(mean_e)) + 1
-        theta = mean_e[3:7].sum()                  # 4..7 Hz
-        alpha = mean_e[7:12].sum()                 # 8..12 Hz
-        beta = mean_e[12:30].sum()                 # 13..30 Hz
-        print(f"  {ch:<5} {peak_hz:4d}Hz {theta:9.0f} {alpha:9.0f} {beta:9.0f}")
+        print(f"  {ch:<5} {peak_hz:4d}Hz {mean_e[3:7].sum():9.0f} "
+              f"{mean_e[7:12].sum():9.0f} {mean_e[12:30].sum():9.0f}")
     print(f"{DIM}（主頻若在 60 Hz 附近多為市電干擾/接觸不良；正常 EEG 多集中在低頻）{RESET}")
 
 
@@ -369,41 +384,11 @@ def pick_csv_in_dir(d, label):
 
 
 def do_cat():
-    """查看原始數據：選 EI / FFT / FAA 裡的 csv，如 cat 直接印出內容。"""
+    """查看原始數據：選 Features 裡的 csv，如 cat 直接印出內容。"""
     print(f"{BOLD}{CYAN}== 查看原始數據 =={RESET}\n")
-    print("  [1] EI 專注度結果（EI/）")
-    print("  [2] FFT 頻譜能量（FFT/<通道>/）")
-    print("  [3] FAA 前額 alpha 不對稱（FAA/）")
-    print("  [0] 返回")
-    c = ask("\n請選擇：")
-
-    if c == "1":
-        path = pick_csv_in_dir(os.path.join(BASE_DIR, "EI"), "EI")
-        if path:
-            cat_file(path)
-    elif c == "3":
-        path = pick_csv_in_dir(os.path.join(BASE_DIR, "FAA"), "FAA")
-        if path:
-            cat_file(path)
-    elif c == "2":
-        fft_dir = os.path.join(BASE_DIR, "FFT")
-        chans = [ch for ch in CHANNELS
-                 if os.path.isdir(os.path.join(fft_dir, ch))
-                 and any(f.endswith(".csv") for f in os.listdir(os.path.join(fft_dir, ch)))]
-        if not chans:
-            print(f"{YELLOW}FFT/ 內還沒有任何資料。先做一次 FFT（選單 [5]）。{RESET}")
-            return
-        print(f"\n{BOLD}選擇通道：{RESET}")
-        for i, ch in enumerate(chans):
-            print(f"  [{i}] {ch}")
-        sel = ask("通道編號：")
-        if not (sel and sel.isdigit() and int(sel) < len(chans)):
-            print(f"{RED}無效的選擇。{RESET}")
-            return
-        ch = chans[int(sel)]
-        path = pick_csv_in_dir(os.path.join(fft_dir, ch), f"FFT/{ch}")
-        if path:
-            cat_file(path)
+    path = pick_csv_in_dir(FEATURES_DIR, "Features")
+    if path:
+        cat_file(path)
 
 
 def do_view_data():
@@ -415,7 +400,7 @@ def do_view_data():
               + ("： " + ", ".join(r[:-4] for r in recs) if recs else "（無）") + "\n")
         print("  [1] 錄製檔訊號摘要（每通道 平均/RMS/最小/最大）")
         print("  [2] 查看 EI 專注度結果")
-        print("  [3] 查看 FFT 主頻與頻帶能量")
+        print("  [3] 查看 FFT 主頻與頻帶能量（即時計算）")
         print("  [4] 查看 FAA 前額 alpha 不對稱")
         print("  [0] 返回主選單")
         c = ask("\n請選擇：")
@@ -443,16 +428,16 @@ MENU = f"""{BOLD}{CYAN}============================================
    [1] 掃描並選擇 MUSE 裝置
    [2] 即時監控原始 EEG
    [3] 錄製資料到 Data/
-   [4] 一鍵流程：監控+錄製 → FFT → EI → FAA  {DIM}(★推薦){RESET}
+   [4] 一鍵流程：監控+錄製 → FFT → Features  {DIM}(★推薦){RESET}
 
  {BOLD}分析{RESET}
-   [5] 對錄製檔做每秒 FFT（輸出 FFT/）
-    [6] 對錄製檔算 EI + FAA（眨眼/BPM 併入 Features）
+   [5] 對錄製檔做每秒 FFT（只顯示摘要，不存檔）
+    [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 
  {BOLD}查看 / 管理{RESET}
-   [7] 查看數據（訊號摘要 / EI / FFT / FAA）
-   [8] 刪除專案內所有 CSV
-   [9] 查看原始數據
+   [7] 查看數據（訊號摘要 / EI / FAA / FFT）
+   [8] 刪除 CSV（Data/、Features/；保留 Model/ 訓練資料）
+   [9] 查看 Features 原始內容
    [0] 離開
 {DIM}--------------------------------------------{RESET}"""
 
@@ -483,6 +468,17 @@ def main():
             action()
         except KeyboardInterrupt:
             print(f"\n{YELLOW}已中斷，返回選單。{RESET}")
+        except SystemExit as exc:
+            # 分析模組用 sys.exit("訊息") 回報資料問題（例如 CSV 沒有資料列）。
+            # 那代表「這次操作失敗」，不該把整個控制台一起結束。
+            if exc.code not in (0, None):
+                print(f"\n{YELLOW}此操作結束：{exc.code}{RESET}")
+        except Exception as exc:                  # noqa: BLE001 - 保護網：不讓使用者失去控制台
+            print(f"\n{RED}執行時發生錯誤：{type(exc).__name__}: {exc}{RESET}")
+            if os.environ.get("SIGNAL_MONITOR_DEBUG"):
+                traceback.print_exc()
+            else:
+                print(f"{DIM}（設 SIGNAL_MONITOR_DEBUG=1 可顯示完整錯誤堆疊）{RESET}")
         if choice != "7":   # 查看數據子選單自己有暫停
             pause()
 

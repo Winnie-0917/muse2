@@ -23,6 +23,10 @@ dependencies = [
     "muselsl",   # MUSE 串流層（會一併安裝 pylsl）
     "bleak",     # Linux 原生 BLE 後端（BlueZ / D-Bus，免額外驅動）
     "numpy",     # 陣列運算 + 即時監控統計 + 每秒 FFT 分析
+    "scipy",         # 眨眼偵測的帶通濾波與波峰偵測
+    "pandas",        # Model/ 讀取特徵 CSV
+    "scikit-learn",  # Model/ 邏輯迴歸分類器
+    "joblib",        # Model/ 模型序列化
 ]
 
 [project.scripts]

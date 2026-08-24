@@ -41,12 +41,12 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
   [3] 錄製資料到 Data/
   [4] 一鍵流程：監控+錄製 → FFT → EI   (★推薦)
 分析
-  [5] 對錄製檔做每秒 FFT（輸出 FFT/）
-  [6] 對錄製檔算專注度 EI（輸出 EI/）
+  [5] 對錄製檔做每秒 FFT（只顯示摘要，不存檔）
+  [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 查看 / 管理
-  [7] 查看數據（訊號摘要 / EI 結果 / FFT 主頻與頻帶能量）
-  [8] 刪除專案內所有 CSV
-  [9] 查看原始數據（選 EI 或 FFT 的 csv，如 cat 直接印出）
+  [7] 查看數據（訊號摘要 / EI / FAA / FFT 主頻與頻帶能量）
+  [8] 刪除 CSV（Data/、Features/；保留 Model/ 訓練資料）
+  [9] 查看原始數據（選 Features 或 FFT 的 csv，如 cat 直接印出）
   [0] 離開
 ```
 
@@ -127,57 +127,167 @@ $$\Large FAA = \ln(\alpha_{AF8}) - \ln(\alpha_{AF7})$$
 
 ## 六、眨眼每分鐘頻率（Blinks Per Minute, BPM）
 
-### 1. 訊號預處理（去除直流偏移與取絕對值）
+眨眼會在額電極（AF7/AF8）造成一個持續約 100–400 ms 的大幅偏轉，是 EEG 裡最好認的偽訊之一。
+一般清醒狀態約 **15–20 次/分**，專注閱讀時會下降，疲勞或分心時上升。
 
-將原始訊號減去平均值，並取絕對值，得到處理後的新序列 $y[n]$：
+### 1. 帶通濾波（0.5–5 Hz）
 
-&nbsp;
-
-$$\Large y[n] = \vert{}x[n] - \mu\vert{}$$
-
-&nbsp;
-
-### 2. 振幅門檻（Threshold）
-
-設定AF7感測器 $100\ \mu V$ 條件。該點的電壓絕對值必須大於或等於 100：
+眨眼是慢波，能量集中在 0.5–5 Hz。先用 2 階 Butterworth 零相位帶通濾掉直流漂移
+與 alpha、肌電等高頻成分：
 
 &nbsp;
-
-$$\Large y[n] \ge 100 \mu V$$
-
+$$\Large y[n] = \mathrm{BPF}_{0.5\text{–}5\,\mathrm{Hz}}\big(x[n]\big)$$
 &nbsp;
 
-### 3. 最小距離限制（Minimum Distance Constraint）
+濾波對**整段錄製一次做完**，不是逐秒做 —— 逐秒濾波會在每個 1 秒邊界產生假訊號，
+也會把跨越邊界的眨眼切成兩半。
 
-為了防止「慢眨眼被誤判成 2 次」，我們加入了冷卻距離 $D$。假設 $f_s$ 是取樣率（256 Hz），我們將冷卻時間設為 0.5 秒，則距離參數 $D = 0.5 \times f_s = 128$ 個採樣點。
+### 2. 自適應門檻（MAD）
+
+每個人、每次配戴的電極接觸阻抗都不同，訊號振幅可以差好幾倍，所以門檻必須跟著訊號
+自己的尺度走。用**中位數絕對離差**（MAD）估穩健標準差：
+
+&nbsp;
+$$\Large \sigma_{\text{robust}} = 1.4826 \times \mathrm{median}\big(\vert{}y[n] - \tilde{y}\vert{}\big)$$
+&nbsp;
+$$\Large \text{threshold} = \max\big(k \cdot \sigma_{\text{robust}},\ \text{floor}\big), \qquad k = 3.0$$
+&nbsp;
+
+MAD 對離群值穩健：少數幾個大眨眼不會像標準差那樣把門檻自己撐高。
+`floor`（預設 8 µV）防止訊號極安靜（例如電極脫落）時把雜訊當成眨眼。
+
+### 3. 最小距離限制（不應期）
+
+為了防止「慢眨眼被誤判成 2 次」，加入冷卻距離 $D = 0.3 \times f_s \approx 77$ 個採樣點：
 
 &nbsp;
 $$\Large \forall n, m \in P \ (n \neq m), \quad \vert{}n - m\vert{} \ge D$$
 &nbsp;
 
-## 六、模型訓練
+眨眼極性取決於參考電極接法，程式對正負兩個方向都找波峰，再依不應期合併 ——
+同一次眨眼的正瓣與負瓣只會算一次。
+
+### 4. 波寬驗證
+
+只保留半高寬落在 **60–500 ms** 的波峰。太窄的是尖波雜訊，太寬的是體動或漂移。
+
+### 5. 滑動窗口 BPM
+
+&nbsp;
+$$\Large \mathrm{BPM}_t = \Big(\sum_{i=t-w+1}^{t} \text{blinks}_i\Big) \times \frac{60}{w}, \qquad w = 10$$
+&nbsp;
+
+> **注意**：$w = 10$ 秒時 BPM 的解析度是 $60/10 = 6$，數值只會是 0, 6, 12, 18…
+> 要平滑一點的曲線可以用 `--window 30`（解析度 2）或 `--window 60`（解析度 1），
+> 但輸出欄位名會跟著變成 `BPM_smooth30` / `BPM_smooth60`。
+
+### 用法
+
 ```bash
-python Model/predict_model.py Features/1.csv
+python -m signal_monitor.analysis.blink Temp/1.csv            # 逐秒列出
+python -m signal_monitor.analysis.blink Temp/1.csv --quiet    # 只看摘要
+python -m signal_monitor.analysis.blink Temp/1.csv --k 3.5    # 調門檻（越大越保守）
+python -m signal_monitor.analysis.blink Temp/1.csv --channel AF7+AF8   # 雙通道平均
+python -m signal_monitor.analysis.blink Temp/1.csv --out blink.csv
 ```
-### 設計「絕對無聊」任務（標籤 $y=0$）：
-讓受測者盯著螢幕上一個緩慢移動的白點長達 5 分鐘。
 
-### 設計「絕對不無聊」任務（標籤 $y=1$）：
-讓受測者玩一款極度需要反應速度的遊戲（如網頁版的節奏遊戲或俄羅斯方塊）5 分鐘。
+`--k` 是主要的調整旋鈕：抓太多就調大、抓太少就調小。
+偵測結果若落在 5–40 次/分之外，程式會出聲提醒檢查電極接觸。
+`--threshold <µV>` 可強制改用固定門檻（不建議，除非你確定訊號尺度）。
 
-### 模型預測：
-直接把使用者操作 PDF 與操作 Learn8 時的 [EI, FAA, Blink] 丟進這個模型裡，讓模型自己吐出無聊度的機率。
+---
 
-## 七、專案結構與檔案說明
+## 七、模型訓練
 
-程式碼統一放在 `src/signal_monitor/` 套件內，輸出資料夾（`Data/`、`FFT/`、`EI/`、
-`FAA/`）維持在專案根目錄。
+### 實驗設計
+
+**「絕對無聊」任務（標籤 $y=0$）**：讓受測者盯著螢幕上一個緩慢移動的白點長達 5 分鐘。
+
+**「絕對不無聊」任務（標籤 $y=1$）**：讓受測者玩一款極度需要反應速度的遊戲
+（如網頁版的節奏遊戲或俄羅斯方塊）5 分鐘。
+
+錄製結果放進 `Model/boring/`（$y=0$）與 `Model/interesting/`（$y=1$）。
+**檔名數字就是受測者編號**，兩個資料夾裡同號的檔案是同一個人的兩段錄製：
+
+$$\Large \text{受測者} k \;=\; \Big(\texttt{boring/}k\texttt{.csv},\; \texttt{interesting/}k\texttt{.csv}\Big)$$
+
+也就是 S1 = (`boring/1.csv`, `interesting/1.csv`)、S2 = (`boring/2.csv`, `interesting/2.csv`)，依此類推。
+載入時會檢查配對，某位受測者少了一邊會出聲警告。
+
+### 特徵與 Z-score 標準化
+
+每秒取三個特徵：`EI_smooth10`、`FAA_smooth10`、`BPM_smooth10`（前 9 秒滑動平均尚未成形，直接丟棄）。
+三者量綱差很多（EI 約 0.4、BPM 可到 18），先做 **Z-score 標準化**把每個特徵各自壓到同一尺度：
+
+&nbsp;
+$$\Large z_j = \frac{x_j - \mu_j}{\sigma_j}$$
+&nbsp;
+
+$\mu_j, \sigma_j$ **只能由訓練資料估出來**，套用到驗證/預測資料時沿用同一組，否則就是資料洩漏。
+
+### 分類器：Logistic Regression
+
+標準化後丟進邏輯迴歸，直接輸出「有趣」的機率：
+
+&nbsp;
+$$\Large P(\text{interesting} \mid \mathbf{z}) = \sigma\!\left(b + \sum_j w_j z_j\right), \qquad \sigma(t) = \frac{1}{1 + e^{-t}}$$
+&nbsp;
+
+> 這裡不用高斯樸素貝氏，是因為高斯 NB 對每個特徵各自估 $\mu, \sigma$，
+> 做 Z-score 這種 affine 變換後輸出機率**完全不變** —— 標準化等於白做。
+> 邏輯迴歸則會受尺度影響（正則化與收斂），標準化才有意義。
+
+### 訓練
+
+```bash
+python Model/train_model.py                # 全域 Z-score（預設）
+python Model/train_model.py --per-subject  # 每位受測者用自己的 mu/sigma
+python Model/train_model.py --features EI  # 只用單一特徵
+```
+
+驗證採 **Leave-One-Subject-Out**：留一位受測者當測試集，其餘訓練。
+不能隨機切 row —— 相鄰秒高度相關，同一段錄製同時出現在訓練與測試會嚴重高估準確率。
+
+### 預測
+
+```bash
+python Model/predict_model.py Features/1.csv                              # 單段
+python Model/predict_model.py Features/pdf.csv Features/learn8.csv        # 兩段對比
+python Model/predict_model.py Features/pdf.csv Features/learn8.csv --baseline auto
+python Model/predict_model.py Features/1.csv --per-second                 # 逐秒機率
+```
+
+把使用者操作 PDF 與操作 Learn8 時的 `[EI, FAA, Blink]` 丟進模型，輸出每段的 P(有趣)。
+
+`--baseline auto` 會把列出的所有 CSV 合併當這位受測者的基準線來算 $\mu, \sigma$，
+抵銷個體差異（有人 EI 天生就高）。同一人做兩段時建議加上；
+**單一檔案不要用** —— 那會把該段平均壓成 0，訊號就沒了。
+
+
+## 八、專案結構與檔案說明
+
+程式碼統一放在 `src/signal_monitor/` 套件內，輸出資料夾只剩 `Data/`（原始錄製）
+與 `Features/`（分析結果），都在專案根目錄。
+
+**FFT、EI、FAA 都不再落檔。** 三者都只是中間產物：FFT 是 EI/FAA 的輸入，
+EI/FAA 則直接併進 Features。存起來又大又沒人讀，要看的時候即時重算就好
+（256 點 FFT 很快）。選單 [6] 直接算完就併進
+`Features/<編號>.csv`（欄位：`second, EI, EI_smooth10, FAA, FAA_smooth10, blinks, BPM_smooth10`），
+那份檔案就是模型訓練與預測的輸入。
 
 ```
 muse2/
 ├── pyproject.toml            # 專案設定與相依套件（取代 requirements.txt）
 ├── README.md
-├── Data/  FFT/  EI/  FAA/     # 錄製與分析輸出（.csv 由 .gitignore 忽略）
+├── Data/                     # 原始 EEG 錄製（.csv 由 .gitignore 忽略）
+├── Features/                 # EI / FAA / 眨眼 合併輸出，也是模型的輸入
+├── Model/                    # 無聊/有趣 分類模型
+│   ├── boring/k.csv          # 受測者 k 的絕對無聊任務錄製（y=0）
+│   ├── interesting/k.csv     # 受測者 k 的絕對不無聊任務錄製（y=1）
+│   ├── model_utils.py        # 資料載入、受測者分組、Z-score 標準化
+│   ├── train_model.py        # 訓練 + Leave-One-Subject-Out 交叉驗證
+│   ├── predict_model.py      # 輸出一段錄製的 P(有趣)
+│   └── trained_model.joblib  # 訓練好的模型（scaler + 分類器）
 └── src/signal_monitor/
     ├── __main__.py           # python -m signal_monitor → 開啟控制台
     ├── cli.py                # 互動式控制台（原 main.py）
@@ -188,9 +298,9 @@ muse2/
     │   └── monitor_raw.py    # 直接 BLE 連線 + 即時監控原始 EEG
     ├── data_utils/           # 資料處理
     │   ├── record_csv.py     # 直接 BLE 連線、把原始 EEG 錄成 CSV
-    │   └── clean_csv.py      # 刪除專案內所有 .csv（保留資料夾與 .gitkeep）
+    │   └── clean_csv.py      # 刪除 .csv，但保留 Model/ 訓練資料與 .gitkeep
     └── analysis/             # 演算法與分析
-        ├── fft_energy.py     # 每秒 FFT，算 1..128 Hz 各頻率能量
+        ├── fft_energy.py     # 每秒 FFT（不落檔，結果供 EI/FAA 使用）
         ├── engagement.py     # 每秒 NASA 專注度指數 EI + 10 秒滑動平均
         └── faa.py            # 每秒前額 alpha 不對稱 FAA + 10 秒滑動平均
 ```
@@ -202,8 +312,11 @@ muse2/
 | `signal_monitor.hardware.list_devices` | 掃描附近 MUSE 裝置、取得 BLE address |
 | `signal_monitor.hardware.monitor_raw`  | 直接 BLE 連線 + 即時監控原始 EEG |
 | `signal_monitor.data_utils.record_csv` | 直接 BLE 連線、把原始 EEG 錄成 CSV |
-| `signal_monitor.analysis.fft_energy`   | 對錄好的 CSV 做每秒 FFT，算 1..128 Hz 各頻率能量 |
+| `signal_monitor.analysis.fft_energy`   | 每秒 FFT，算 1..128 Hz 各頻率能量（只顯示摘要；加 `--out <dir>` 才存檔）|
 | `signal_monitor.analysis.engagement`   | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均 |
-| `signal_monitor.analysis.faa`          | 每秒算前額 alpha 不對稱 FAA + 10 秒滑動平均，輸出 FAA/ |
-| `signal_monitor.data_utils.clean_csv`  | 刪除專案內所有 .csv（Data、FFT、EI、FAA），保留資料夾與 .gitkeep |
+| `signal_monitor.analysis.faa`          | 每秒算前額 alpha 不對稱 FAA + 10 秒滑動平均 |
+| `signal_monitor.data_utils.clean_csv`  | 刪除 .csv（Data、FFT、Features）；**預設保留 `Model/` 訓練資料**，保留資料夾與 .gitkeep |
+| `Model/model_utils.py` | 資料載入、受測者分組、Z-score 標準化 |
+| `Model/train_model.py` | 訓練有趣/無聊分類器 + Leave-One-Subject-Out 交叉驗證 |
+| `Model/predict_model.py` | 對一段（或多段）錄製輸出 P(有趣) |
 | `pyproject.toml` | 專案設定與相依套件 |

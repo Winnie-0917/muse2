@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-刪除本專案內所有 CSV 檔（錄製的原始資料、FFT 輸出、EI 輸出、FAA 輸出）。
+刪除專案內的 CSV 檔，但**保留 Model/ 的訓練資料**。
 
-會刪除的位置：專案根目錄底下所有 *.csv
-  - Data/*.csv        （record_csv.py / Overall_process.py 錄下的原始 EEG）
-  - EI/*.csv         （engagement.py 的 EI 輸出）
-  - FAA/*.csv        （faa.py 的 FAA 輸出）
-  - FFT/<通道>/*.csv （fft_energy.py 的每秒 FFT 輸出）
+預設會刪除
+----------
+  - Data/*.csv       （原始 EEG 錄製）
+  - Features/*.csv   （EI / FAA / 眨眼 / BPM 合併輸出）
   - 其他散落在專案內的 *.csv
+
+預設**不會**碰
+--------------
+  - Model/**/*.csv   boring / interesting 的訓練資料。這是人工標註整理過的，
+                     不是分析產物，重跑任何步驟都生不回來，所以預設保護。
+                     要一起刪：--include-model（或 --all）
 
 安全機制
 --------
@@ -15,12 +20,16 @@
   等目錄，避免誤刪 Python 套件或版控內部的 .csv。
 - 只刪副檔名為 .csv 的檔；**不動 .gitkeep，也不刪資料夾**（空資料夾結構保留）。
 - 預設會先列出清單並要求輸入 y 確認；刪除不可復原。
+- 刪掉 Data/ 的原始錄製後，Features 就再也算不回來了（只能重錄）。
+  想留著原始錄製請加 --keep-recordings，那樣刪完會自動重建一次 Features/。
 
 用法
 ----
-    python -m signal_monitor.data_utils.clean_csv            # 列出並詢問確認後刪除
-    python -m signal_monitor.data_utils.clean_csv --dry-run  # 只預覽、不刪除
-    python -m signal_monitor.data_utils.clean_csv -y         # 不詢問，直接刪除（給腳本用）
+    python -m signal_monitor.data_utils.clean_csv                   # 列出並詢問確認後刪除
+    python -m signal_monitor.data_utils.clean_csv --dry-run         # 只預覽、不刪除
+    python -m signal_monitor.data_utils.clean_csv -y                # 不詢問，直接刪除
+    python -m signal_monitor.data_utils.clean_csv --keep-recordings # 保留 Data/ 的原始錄製
+    python -m signal_monitor.data_utils.clean_csv --all             # 連訓練資料也刪
 """
 import argparse
 import os
@@ -28,21 +37,36 @@ import re
 import shutil
 import sys
 
-from signal_monitor.analysis import engagement, faa
-from signal_monitor.overall_process import combine_ei_faa_outputs
+from signal_monitor.analysis.features import build_features_csv
 from signal_monitor.paths import PROJECT_ROOT
 
 BASE_DIR = PROJECT_ROOT
 # 這些目錄不進入搜尋（避免誤刪套件/版控內部的 .csv）
 EXCLUDE_DIRS = {"venv", ".venv", "env", ".git", "__pycache__", ".idea", ".vscode"}
 
+RECORDINGS_DIR = "Data"    # 原始 EEG 錄製
+# 預設保護：訓練資料是人工標註整理過的，不是分析產物，重跑任何步驟都生不回來。
+MODEL_DIR = "Model"        # boring / interesting 訓練資料
 
-def find_csv_files(base):
-    """回傳 base 底下所有 .csv 的絕對路徑（已排除 EXCLUDE_DIRS）。"""
+
+def find_csv_files(base, keep_recordings=False, include_model=False):
+    """回傳 base 底下可刪除的 .csv 絕對路徑。
+
+    預設刪掉除了 Model/（訓練資料）以外的所有 .csv，包含 Data/ 的原始錄製。
+    keep_recordings=True 時額外保住 Data/；include_model=True 時連訓練資料也刪。
+    """
+    protected = set()
+    if keep_recordings:
+        protected.add(os.path.join(base, RECORDINGS_DIR))
+    if not include_model:
+        protected.add(os.path.join(base, MODEL_DIR))
+
     found = []
     for root, dirs, files in os.walk(base):
         # 就地修改 dirs 讓 os.walk 不要進入被排除的資料夾
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        if any(root == p or root.startswith(p + os.sep) for p in protected):
+            continue
         for name in files:
             if name.lower().endswith(".csv"):
                 found.append(os.path.join(root, name))
@@ -56,17 +80,18 @@ def human_size(n):
         n /= 1024
 
 
-def regenerate_ei_faa_outputs(base_dir=None):
-    """刪除並重建 EI / FAA / Features 輸出（含眨眼/BPM），並用最新錄製檔生成。"""
+def regenerate_features_output(base_dir=None):
+    """刪除並重建 Features/ 輸出（EI / FAA / 眨眼 / BPM），用最新的錄製檔生成。
+
+    EI 與 FAA 不再各自輸出到 EI/ 與 FAA/ —— 兩者都直接併進 Features/<編號>.csv，
+    所以這裡只重建 Features/。回傳重建出來的檔案路徑清單。
+    """
     base_dir = base_dir or PROJECT_ROOT
     data_dir = os.path.join(base_dir, "Data")
     if not os.path.isdir(data_dir):
         return []
 
-    files = [
-        f for f in os.listdir(data_dir)
-        if re.match(r"^\d+\.csv$", f)
-    ]
+    files = [f for f in os.listdir(data_dir) if re.match(r"^\d+\.csv$", f)]
     if not files:
         return []
 
@@ -74,61 +99,49 @@ def regenerate_ei_faa_outputs(base_dir=None):
     latest_path = os.path.join(data_dir, latest_file)
     stem = re.sub(r"\.csv$", "", latest_file)
 
-    for rel_dir in ("EI", "FAA", "Features"):
-        out_dir = os.path.join(base_dir, rel_dir)
-        if os.path.isdir(out_dir):
-            shutil.rmtree(out_dir)
-        os.makedirs(out_dir, exist_ok=True)
-        open(os.path.join(out_dir, ".gitkeep"), "a").close()
+    out_dir = os.path.join(base_dir, "Features")
+    if os.path.isdir(out_dir):
+        shutil.rmtree(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    open(os.path.join(out_dir, ".gitkeep"), "a").close()
 
-    import signal_monitor.analysis.fft_energy as fft_energy
-
-    original = {
-        "fft_base": fft_energy.BASE_DIR,
-        "fft_csv": fft_energy.CSV_DIR,
-        "eng_base": engagement.BASE_DIR,
-        "eng_csv": engagement.CSV_DIR,
-        "faa_base": faa.BASE_DIR,
-        "faa_csv": faa.CSV_DIR,
-    }
+    features_path = os.path.join(out_dir, f"{stem}.csv")
     try:
-        fft_energy.BASE_DIR = base_dir
-        fft_energy.CSV_DIR = os.path.join(base_dir, "Data")
-        engagement.BASE_DIR = base_dir
-        engagement.CSV_DIR = os.path.join(base_dir, "Data")
-        faa.BASE_DIR = base_dir
-        faa.CSV_DIR = os.path.join(base_dir, "Data")
-        old_argv = sys.argv[:]
-        sys.argv = ["engagement", latest_path]
-        engagement.main()
-        sys.argv = ["faa", latest_path]
-        faa.main()
-        sys.argv = old_argv
-    finally:
-        fft_energy.BASE_DIR = original["fft_base"]
-        fft_energy.CSV_DIR = original["fft_csv"]
-        engagement.BASE_DIR = original["eng_base"]
-        engagement.CSV_DIR = original["eng_csv"]
-        faa.BASE_DIR = original["faa_base"]
-        faa.CSV_DIR = original["faa_csv"]
-    ei_path = os.path.join(base_dir, "EI", f"{stem}.csv")
-    faa_path = os.path.join(base_dir, "FAA", f"{stem}.csv")
-    features_path = os.path.join(base_dir, "Features", f"{stem}.csv")
-    if os.path.exists(ei_path) and os.path.exists(faa_path):
-        combine_ei_faa_outputs(ei_path, faa_path, features_path, source_csv_path=latest_path)
-
-    return [ei_path, faa_path, features_path]
+        build_features_csv(latest_path, features_path)
+    except ValueError as exc:
+        print(f"重建 Features 失敗：{exc}", file=sys.stderr)
+        return []
+    return [features_path]
 
 
 def main():
     ap = argparse.ArgumentParser(description="刪除本專案內所有 CSV 檔（保留資料夾與 .gitkeep）")
     ap.add_argument("-y", "--yes", action="store_true", help="不詢問，直接刪除")
     ap.add_argument("-n", "--dry-run", action="store_true", help="只預覽要刪的檔，不實際刪除")
+    ap.add_argument("--keep-recordings", action="store_true",
+                    help=f"保留 {RECORDINGS_DIR}/ 的原始錄製不刪（Features 才有辦法重建）")
+    ap.add_argument("--include-model", action="store_true",
+                    help=f"連 {MODEL_DIR}/ 的訓練資料一起刪（預設保護）")
+    ap.add_argument("-a", "--all", action="store_true",
+                    help="連訓練資料也刪，等同 --include-model")
     args = ap.parse_args()
 
-    files = find_csv_files(BASE_DIR)
+    keep_recordings = args.keep_recordings
+    include_model = args.include_model or args.all
+    files = find_csv_files(BASE_DIR, keep_recordings, include_model)
+    kept = []
+    if keep_recordings:
+        kept.append(f"{RECORDINGS_DIR}/（原始錄製）")
+    if not include_model:
+        kept.append(f"{MODEL_DIR}/（訓練資料）")
+    if kept:
+        print(f"保護中，不會刪除：{'、'.join(kept)}")
+        if not include_model:
+            print("（要連訓練資料一起刪請加 --include-model）")
+        print()
+
     if not files:
-        print("專案內沒有任何 .csv 檔，無需刪除。")
+        print("沒有可刪除的 .csv 檔。")
         return
 
     total = sum(os.path.getsize(f) for f in files)
@@ -142,6 +155,12 @@ def main():
         return
 
     if not args.yes:
+        if not keep_recordings:
+            print(f"\n警告：這會刪掉 {RECORDINGS_DIR}/ 的原始 EEG 錄製。"
+                  f"Features 是從它重算出來的，刪掉之後只能重錄；"
+                  f"要保留請加 --keep-recordings。")
+        if include_model:
+            print(f"警告：這會刪掉 {MODEL_DIR}/ 的訓練資料（人工標註整理過的）。")
         try:
             ans = input(f"\n確定要刪除以上 {len(files)} 個檔案嗎？此動作無法復原。(y/N): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -162,11 +181,12 @@ def main():
     print(f"\n完成：已刪除 {deleted} 個檔案" + (f"，{failed} 個失敗。" if failed else "。"))
     print("（資料夾與 .gitkeep 保留，結構不變。）")
 
-    regenerated = regenerate_ei_faa_outputs(BASE_DIR)
+    # 只有加了 --keep-recordings 時 Data/ 才會留著，也才重建得出 Features。
+    regenerated = regenerate_features_output(BASE_DIR)
     if regenerated:
-        print(f"已重新生成分析結果：{', '.join(os.path.relpath(p, BASE_DIR) for p in regenerated)}")
-    else:
-        print("目前沒有可重建的錄製檔，EI / FAA / Features 暫未生成。")
+        print(f"已用最新的錄製檔重建：{', '.join(os.path.relpath(p, BASE_DIR) for p in regenerated)}")
+    elif keep_recordings:
+        print(f"{RECORDINGS_DIR}/ 內沒有可用的錄製檔，Features 未重建。")
 
 
 if __name__ == "__main__":
