@@ -25,7 +25,8 @@ from signal_monitor.paths import PROJECT_ROOT
 # 預設把錄製檔存到專案下的 Data/ 資料夾
 CSV_DIR = os.path.join(PROJECT_ROOT, "Data")
 
-from muselsl import list_muses, backends
+from muselsl import backends
+from signal_monitor.hardware.ble import scan_muses
 from muselsl.muse import Muse
 
 # 只錄 4 個真實 EEG 通道，不含 AUX（AUX 是 data 的索引 4）
@@ -63,7 +64,9 @@ def resolve_address(args):
     if args.address:
         return args.address, (args.name or "Muse")
     print("掃描 MUSE 裝置中 ...")
-    muses = list_muses(backend="bleak")
+    muses, error = scan_muses()
+    if error:
+        sys.exit(f"掃描失敗：{error}")
     if not muses:
         sys.exit("找不到 MUSE 裝置。")
     print(f"使用裝置：{muses[0]['name']}  [{muses[0]['address']}]")

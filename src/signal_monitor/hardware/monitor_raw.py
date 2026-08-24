@@ -30,7 +30,8 @@ from collections import deque
 
 import numpy as np
 
-from muselsl import list_muses, backends
+from muselsl import backends
+from signal_monitor.hardware.ble import scan_muses
 from muselsl.muse import Muse
 
 # MUSE 2（classic 協定）的 EEG 通道與取樣率
@@ -167,7 +168,9 @@ def resolve_address(args):
     if args.address:
         return args.address, (args.name or "Muse")
     print("掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...")
-    muses = list_muses(backend="bleak")
+    muses, error = scan_muses()
+    if error:
+        sys.exit(f"掃描失敗：{error}")
     if not muses:
         sys.exit("找不到 MUSE 裝置。先執行  python -m signal_monitor.hardware.list_devices  排查。")
     m = muses[0]

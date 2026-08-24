@@ -7,10 +7,10 @@
   步驟 1（同時進行）：直接 BLE 連線 MUSE 2，
       - 終端機即時顯示原始 EEG（4 通道波形 / RMS / 訊號品質 / 取樣率）
       - 同一份資料逐一樣本寫入 Data/<編號>.csv
-  步驟 2：停止後自動對該檔跑 fft_energy.py（每秒 FFT → FFT/<通道>/<編號>.csv）
+  步驟 2：停止後自動對該檔算每秒 FFT，只印出各通道的主頻與頻帶能量摘要（不存檔）
     步驟 3：再跑 engagement.py（每秒 EI + 10 秒滑動平均 → EI/<編號>.csv）
     步驟 4：再跑 faa.py（每秒 FAA + 10 秒滑動平均 → FAA/<編號>.csv）
-    步驟 5：以 AF7 即時計算每秒眨眼數與 10 秒滑動 BPM，直接併入 Features/<編號>.csv
+    步驟 3：EI / FAA / 眨眼 一次算完，輸出 Features/<編號>.csv
 
 停止錄製的方式：--seconds 到時自動停，或隨時按 Ctrl+C。
 
@@ -19,7 +19,7 @@
     python -m signal_monitor.overall_process --seconds 60                 # 錄 60 秒後自動分析
     python -m signal_monitor.overall_process --address 00:55:DA:B6:35:CA --seconds 60
     python -m signal_monitor.overall_process --aux                        # 即時畫面也顯示 AUX
-    python -m signal_monitor.overall_process --no-analyze                 # 只監控+錄製，不做 FFT/EI
+    python -m signal_monitor.overall_process --no-analyze                 # 只監控+錄製，不做後續分析
 
 備註：EI 的「穩定分數」需要滿 10 秒才會輸出，想看平滑專注度請至少錄 10 秒以上。
 """
@@ -31,7 +31,8 @@ import subprocess
 import sys
 import time
 
-from muselsl import list_muses, backends
+from muselsl import backends
+from signal_monitor.hardware.ble import scan_muses
 from muselsl.muse import Muse
 
 # 重用即時監控（畫面）與錄製（檔名/通道）的既有元件
@@ -41,7 +42,7 @@ from signal_monitor.hardware.monitor_raw import (
 )
 from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path, CHANNELS as REC_CHANNELS
 from signal_monitor.paths import PROJECT_ROOT
-from signal_monitor.analysis.blink import build_blink_lookup
+from signal_monitor.analysis.features import build_features_csv  # noqa: F401  (相容舊匯入路徑)
 
 FEATURES_DIR = os.path.join(PROJECT_ROOT, "Features")
 
@@ -70,83 +71,32 @@ def resolve_address(args):
     if args.address:
         return args.address, (args.name or "Muse")
     print("掃描 MUSE 裝置中（請確認頭帶已開機、LED 閃爍）...")
-    muses = list_muses(backend="bleak")
+    muses, error = scan_muses()
+    if error:
+        sys.exit(f"掃描失敗：{error}")
     if not muses:
         sys.exit("找不到 MUSE 裝置。先執行 python -m signal_monitor.hardware.list_devices 排查。")
     print(f"使用裝置：{muses[0]['name']}  [{muses[0]['address']}]")
     return muses[0]["address"], muses[0]["name"]
 
 
-def combine_ei_faa_outputs(ei_path, faa_path, out_path, source_csv_path=None):
-    """把 EI / FAA（含眨眼與 BPM）合併到同一個 CSV，輸出到 Features/。"""
-    with open(ei_path, newline="") as f:
-        ei_rows = list(csv.reader(f))
-    with open(faa_path, newline="") as f:
-        faa_rows = list(csv.reader(f))
-
-    if len(ei_rows) < 2 or len(faa_rows) < 2:
-        raise ValueError(f"缺少資料內容：{ei_path} 或 {faa_path}")
-
-    ei_header = ei_rows[0]
-    faa_header = faa_rows[0]
-    ei_value_idx = ei_header.index("EI")
-    ei_smooth_idx = ei_header.index(next(col for col in ei_header if col.startswith("EI_smooth")))
-    faa_value_idx = faa_header.index("FAA")
-    faa_smooth_idx = faa_header.index(next(col for col in faa_header if col.startswith("FAA_smooth")))
-
-    ei_lookup = {
-        row[ei_header.index("second")]: row[ei_value_idx:ei_smooth_idx + 1]
-        for row in ei_rows[1:]
-        if row and row[ei_header.index("second")]
-    }
-    faa_lookup = {
-        row[faa_header.index("second")]: row[faa_value_idx:faa_smooth_idx + 1]
-        for row in faa_rows[1:]
-        if row and row[faa_header.index("second")]
-    }
-
-    def second_sort_key(value):
-        try:
-            return (0, int(value))
-        except ValueError:
-            return (1, value)
-
-    blink_lookup = {}
-    blink_smooth_name = "BPM_smooth10"
-    if source_csv_path and os.path.exists(source_csv_path):
-        blink_lookup, blink_smooth_name = build_blink_lookup(source_csv_path)
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "second", "EI", ei_header[ei_smooth_idx],
-            "FAA", faa_header[faa_smooth_idx],
-            "blinks", blink_smooth_name,
-        ])
-        for second in sorted(set(ei_lookup) & set(faa_lookup), key=second_sort_key):
-            blink_values = blink_lookup.get(second, ["", ""])
-            writer.writerow([second, *ei_lookup[second], *faa_lookup[second], *blink_values])
-
-
 def run_analysis(csv_path):
     """依序執行 FFT、EI、FAA 分析，並合併為 Features/<編號>.csv（含眨眼/BPM）。"""
     py = sys.executable  # 目前的 venv python
     # 先 flush 再叫子程序，確保標題印在子程序輸出「之前」（輸出被導向檔案時尤其重要）
-    print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT（fft_energy）==={RESET}", flush=True)
+    print(f"\n{BOLD}{CYAN}=== 步驟 2：每秒 FFT 摘要（只顯示，不存檔）==={RESET}", flush=True)
     subprocess.run([py, "-m", "signal_monitor.analysis.fft_energy", csv_path])
-    print(f"\n{BOLD}{CYAN}=== 步驟 3：專注度指數 EI（engagement）==={RESET}", flush=True)
-    subprocess.run([py, "-m", "signal_monitor.analysis.engagement", csv_path])
-    print(f"\n{BOLD}{CYAN}=== 步驟 4：前額 alpha 不對稱 FAA（faa）==={RESET}", flush=True)
-    subprocess.run([py, "-m", "signal_monitor.analysis.faa", csv_path])
-    print(f"\n{BOLD}{CYAN}=== 步驟 5：AF7 眨眼偵測（併入 Features）==={RESET}", flush=True)
+    print(f"\n{BOLD}{CYAN}=== 步驟 3：EI + FAA + 眨眼 → Features ==={RESET}", flush=True)
 
+    # 直接在記憶體裡算完寫出 Features，不再經過 EI/ 與 FAA/ 中繼檔。
+    # 舊寫法是分別跑 engagement / faa 子程序、再把兩個檔讀回來合併，但
+    # subprocess.run() 的回傳碼沒人檢查：子程序失敗（例如缺 scipy、Ctrl+C）
+    # 時會變成開檔的 FileNotFoundError，更糟的是若上一次的 EI/<n>.csv 還在，
+    # 會靜默地把過期資料合併進 Features。
     stem = re.sub(r"\.csv$", "", os.path.basename(csv_path))
-    ei_path = os.path.join(PROJECT_ROOT, "EI", f"{stem}.csv")
-    faa_path = os.path.join(PROJECT_ROOT, "FAA", f"{stem}.csv")
     features_path = os.path.join(FEATURES_DIR, f"{stem}.csv")
-    combine_ei_faa_outputs(ei_path, faa_path, features_path, source_csv_path=csv_path)
-    print(f"\n{BOLD}{CYAN}已合併輸出 Features CSV：{features_path}{RESET}")
+    n_sec = build_features_csv(csv_path, features_path)
+    print(f"\n{BOLD}{CYAN}已輸出 {n_sec} 秒的 Features CSV：{features_path}{RESET}")
 
 
 def main():
@@ -160,7 +110,7 @@ def main():
     ap.add_argument("--window", type=float, default=2.0, help="即時統計/波形視窗秒數（預設 2）")
     ap.add_argument("--retries", type=int, default=3, help="連線重試次數（預設 3）")
     ap.add_argument("--aux", action="store_true", help="即時畫面顯示 AUX（預設隱藏）")
-    ap.add_argument("--no-analyze", action="store_true", help="只監控+錄製，不做 FFT/EI")
+    ap.add_argument("--no-analyze", action="store_true", help="只監控+錄製，不做後續分析")
     args = ap.parse_args()
 
     show_idx = list(range(5)) if args.aux else [0, 1, 2, 3]
@@ -214,14 +164,14 @@ def main():
           f"（共 {rec.count} 個樣本，約 {secs:.1f} 秒）")
 
     if args.no_analyze:
-        print(f"{DIM}（--no-analyze：略過 FFT/EI 分析）{RESET}")
+        print(f"{DIM}（--no-analyze：略過後續分析）{RESET}")
         return
     if rec.count < 256:
-        print(f"{DIM}資料不足 1 秒，略過 FFT/EI 分析。{RESET}")
+        print(f"{DIM}資料不足 1 秒，略過後續分析。{RESET}")
         return
 
     run_analysis(out_path)
-    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → FFT（FFT/）→ EI（EI/）→ FAA（FAA/）→ Features（含 Blink/BPM）")
+    print(f"\n{BOLD}全部完成{RESET}：原始 {out_path} → Features（EI/FAA/Blink/BPM）")
     if secs < 10:
         print(f"{DIM}提醒：此段只有約 {secs:.0f} 秒，未滿 10 秒故無「穩定 EI」；"
               f"想看平滑專注度請錄 10 秒以上。{RESET}")
