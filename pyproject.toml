@@ -18,7 +18,10 @@ name = "signal-monitor"
 version = "0.1.0"
 description = "MUSE 2 原始 EEG 擷取、每秒 FFT、專注度指數 EI 與前額 alpha 不對稱 FAA"
 readme = "README.md"
-requires-python = ">=3.8"
+# 3.10 是相依套件的實際下限（bleak >=3.10），也是型別標註用 `X | None`
+# （PEP 604）所需的版本。注意 numpy/scipy 的新版另外要求 >=3.12，
+# 在 3.10/3.11 上 pip 會自動退回較舊但相容的版本。
+requires-python = ">=3.10"
 dependencies = [
     "muselsl",   # MUSE 串流層（會一併安裝 pylsl）
     "bleak",     # Linux 原生 BLE 後端（BlueZ / D-Bus，免額外驅動）

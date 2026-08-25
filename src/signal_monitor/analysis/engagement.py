@@ -34,8 +34,6 @@ NASA 專注度 / 投入度指數（Engagement Index, EI）分析。
 """
 import argparse
 import csv
-import os
-import re
 import sys
 from collections import deque
 
@@ -43,12 +41,10 @@ import numpy as np
 
 # 沿用「之前的 FFT 腳本」的函式（每秒 FFT、讀檔、找最新檔）
 from signal_monitor.analysis.fft_energy import (
-    BASE_DIR,
     CSV_DIR,
-    CHANNELS,
     latest_csv,
     load_eeg,
-    per_second_energy,
+    compute_band_energies,
     DEFAULT_WINDOW,
 )
 from signal_monitor.analysis.blink import blink_second_mask
@@ -69,7 +65,8 @@ def band_energy(energies, band):
     return energies[:, lo:hi + 1].sum(axis=1)
 
 
-def compute_ei_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW):
+def compute_ei_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW,
+                      energies=None, blink_mask=None):
     """由原始 EEG 算出每秒 EI 的陣列。
 
     分母為 0 的秒記為 NaN（避免除以零）；reject_blinks=True 時，
@@ -81,8 +78,8 @@ def compute_ei_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW):
     不必先把 EI 落檔到 EI/ 再讀回來。
     """
     n_sec = len(data) // fs
-    energies = {ch: per_second_energy(data[:, i], fs, window=window)
-                for i, ch in enumerate(CHANNELS)}
+    if energies is None:
+        energies = compute_band_energies(data, fs, window)
 
     numerator = band_energy(energies["AF7"], "beta") + band_energy(energies["AF8"], "beta")
     denominator = (
@@ -94,7 +91,9 @@ def compute_ei_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW):
         out=np.full(n_sec, np.nan), where=denominator > 0,
     )
     if reject_blinks:
-        ei[blink_second_mask(data, fs=fs)] = np.nan
+        if blink_mask is None:
+            blink_mask = blink_second_mask(data, fs=fs)
+        ei[blink_mask] = np.nan
     return ei
 
 
@@ -106,6 +105,10 @@ def smooth_series(values, win, min_valid=3):
     排除眨眼後視窗內會出現 NaN，min_valid 確保平滑值不是由一兩秒硬撐出來的。
     EI 與 FAA 用的是同一套平滑邏輯，所以放在這裡共用。
     """
+    # min_valid 不能大於視窗長度，否則條件永遠不成立、整欄都是空值。
+    # （--window 1 或 2 搭配預設 min_valid=3 就會踩到）
+    min_valid = max(1, min(min_valid, win))
+
     q = deque(maxlen=win)
     out = []
     for i, value in enumerate(values):

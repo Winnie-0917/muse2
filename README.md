@@ -10,7 +10,11 @@
 
 ## 一、環境安裝
 
-建立虛擬環境 `venv/`，並以**可編輯模式**安裝本套件（相依套件 `muselsl`、`bleak`、`numpy` 都寫在 `pyproject.toml`，會自動一併安裝）：
+需要 **Python 3.10 以上**（`bleak` 的下限；`numpy`/`scipy` 的新版另外要求 3.12，
+在 3.10/3.11 上 pip 會自動退回較舊但相容的版本）。
+
+建立虛擬環境 `venv/`，並以**可編輯模式**安裝本套件（相依套件 `muselsl`、`bleak`、
+`numpy`、`scipy`、`pandas`、`scikit-learn`、`joblib` 都寫在 `pyproject.toml`，會自動一併安裝）：
 
 ```bash
 python3 -m venv venv
@@ -46,7 +50,7 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
 查看 / 管理
   [7] 查看數據（訊號摘要 / EI / FAA / FFT 主頻與頻帶能量）
   [8] 刪除 CSV（Data/、Features/；保留 Model/ 訓練資料）
-  [9] 查看原始數據（選 Features 或 FFT 的 csv，如 cat 直接印出）
+  [9] 查看 Features 原始內容（如 cat 直接印出）
   [0] 離開
 ```
 
@@ -184,11 +188,11 @@ $$\Large \mathrm{BPM}_t = \Big(\sum_{i=t-w+1}^{t} \text{blinks}_i\Big) \times \f
 ### 用法
 
 ```bash
-python -m signal_monitor.analysis.blink Temp/1.csv            # 逐秒列出
-python -m signal_monitor.analysis.blink Temp/1.csv --quiet    # 只看摘要
-python -m signal_monitor.analysis.blink Temp/1.csv --k 3.5    # 調門檻（越大越保守）
-python -m signal_monitor.analysis.blink Temp/1.csv --channel AF7+AF8   # 雙通道平均
-python -m signal_monitor.analysis.blink Temp/1.csv --out blink.csv
+python -m signal_monitor.analysis.blink Data/1.csv            # 逐秒列出
+python -m signal_monitor.analysis.blink Data/1.csv --quiet    # 只看摘要
+python -m signal_monitor.analysis.blink Data/1.csv --k 3.5    # 調門檻（越大越保守）
+python -m signal_monitor.analysis.blink Data/1.csv --channel AF7+AF8   # 雙通道平均
+python -m signal_monitor.analysis.blink Data/1.csv --out blink.csv
 ```
 
 `--k` 是主要的調整旋鈕：抓太多就調大、抓太少就調小。

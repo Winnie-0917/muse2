@@ -127,6 +127,15 @@ def analysis_window(fs, kind=DEFAULT_WINDOW):
     return w / np.sqrt(np.mean(w ** 2))
 
 
+def compute_band_energies(data, fs=256, window=DEFAULT_WINDOW):
+    """一次算好四個通道的每秒 FFT 能量矩陣，回傳 {通道名: (秒數, fs//2+1)}。
+
+    EI 與 FAA 用的是同一批能量，各自算一次等於把整段錄製的 FFT 做兩遍。
+    """
+    return {ch: per_second_energy(data[:, i], fs, window=window)
+            for i, ch in enumerate(CHANNELS)}
+
+
 def per_second_energy(signal, fs, window=DEFAULT_WINDOW):
     """
     把單一通道的訊號切成連續、不重疊的 1 秒（fs 樣本）視窗，

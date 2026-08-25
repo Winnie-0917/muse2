@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 # 重用既有模組的路徑與函式
-from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
+from signal_monitor.data_utils.record_csv import CSV_DIR
 from signal_monitor.analysis.fft_energy import (
     BASE_DIR, CHANNELS, load_eeg, per_second_energy,
 )

@@ -23,12 +23,21 @@ from model_utils import Session, ZScoreScaler, load_session
 MODEL_PATH = Path(__file__).resolve().parent / "trained_model.joblib"
 
 
+RETRAIN_HINT = "請先重新執行：python Model/train_model.py"
+
+
 def load_bundle(path: Path) -> dict:
-    bundle = joblib.load(path)
-    if not isinstance(bundle, dict) or "classifier" not in bundle:
+    try:
+        bundle = joblib.load(path)
+    except (AttributeError, ModuleNotFoundError, ImportError) as exc:
+        # 舊版模型檔存的是 pickle 過的 GaussianNaiveBayes 實例，該類別已不存在，
+        # unpickle 會在「檢查內容」之前就失敗，所以要在這裡攔截。
         raise ValueError(
-            f"{path} 不是本版訓練腳本產生的模型；請先重新執行 python Model/train_model.py"
-        )
+            f"{path} 是舊版格式的模型，本版已無法載入（{type(exc).__name__}: {exc}）。\n"
+            f"{RETRAIN_HINT}"
+        ) from exc
+    if not isinstance(bundle, dict) or "classifier" not in bundle:
+        raise ValueError(f"{path} 不是本版訓練腳本產生的模型；{RETRAIN_HINT}")
     return bundle
 
 
@@ -40,7 +49,25 @@ def probabilities(bundle: dict, X: np.ndarray, scaler: ZScoreScaler) -> np.ndarr
 
 def build_scaler(bundle: dict, sessions: Sequence[Session],
                  use_baseline: bool) -> Tuple[ZScoreScaler, bool]:
-    """回傳 (scaler, 是否真的用了輸入資料當基準線)。"""
+    """回傳 (scaler, 是否真的用了輸入資料當基準線)。
+
+    模型若是用 --per-subject 訓練的，它學到的是「相對於該受測者自己基準線」
+    的關係，內建的 scaler 只是各受測者 mu/sigma 的平均值，拿來預測會系統性偏移。
+    這種模型給了兩段以上錄製時自動改用它們當基準線，與訓練時的語意一致。
+    """
+    per_subject_model = bool(bundle.get("per_subject_zscore"))
+
+    if not use_baseline and per_subject_model:
+        if len(sessions) >= 2:
+            print("提示：這個模型是用 --per-subject 訓練的，已自動改用本次輸入的所有"
+                  "檔案合併當基準線（等同訓練時的做法）。", file=sys.stderr)
+            use_baseline = True
+        else:
+            print("警告：這個模型是用 --per-subject 訓練的，但只給了一段錄製，"
+                  "無法建立該受測者的基準線；以下機率會有系統性偏移，僅供參考。\n"
+                  "      建議同時給該受測者的兩段錄製（例如 PDF 與 Learn8）。",
+                  file=sys.stderr)
+
     if not use_baseline:
         return bundle["scaler"], False
     if len(sessions) < 2:
@@ -87,7 +114,11 @@ def main() -> int:
         print(f"找不到模型檔：{model_path}\n請先執行：python Model/train_model.py", file=sys.stderr)
         return 1
 
-    bundle = load_bundle(model_path)
+    try:
+        bundle = load_bundle(model_path)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     features = bundle["features"]
 
     sessions: List[Session] = []

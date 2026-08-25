@@ -108,7 +108,7 @@ def detect_blink_peaks(signal, fs=256, k=MAD_K, threshold_uv=None,
     return np.array(sorted(kept), dtype=int), info
 
 
-def blink_second_mask(data, fs=256, channel="AF7", guard_s=0.25, **detect_kwargs):
+def blink_second_mask(data, fs=256, channel="AF7", guard_s=0.25, peaks=None, **detect_kwargs):
     """標記每一秒是否被眨眼污染，回傳長度 n_sec 的布林陣列。
 
     眨眼會在低頻製造巨大能量，直接灌進 theta（4-8 Hz）。theta 位於
@@ -131,7 +131,8 @@ def blink_second_mask(data, fs=256, channel="AF7", guard_s=0.25, **detect_kwargs
     if n_sec == 0:
         return mask
 
-    peaks, _ = detect_blink_peaks(signal, fs=fs, **detect_kwargs)
+    if peaks is None:
+        peaks, _ = detect_blink_peaks(signal, fs=fs, **detect_kwargs)
     guard = int(round(guard_s * fs))
     for idx in peaks:
         first = max(0, (idx - guard) // fs)
@@ -160,7 +161,8 @@ def count_spikes(segment, threshold_uv, min_distance):
 
 
 def build_blink_rows(data, fs=256, window=10, threshold_uv=None, k=MAD_K,
-                     refractory_s=REFRACTORY_S, channel="AF7", return_info=False):
+                     refractory_s=REFRACTORY_S, channel="AF7", return_info=False,
+                     peaks=None, info=None):
     """回傳 [(second, blinks, bpm_or_empty), ...]。
 
     channel 可給單一通道名，或 "AF7+AF8" 取兩通道平均
@@ -173,9 +175,12 @@ def build_blink_rows(data, fs=256, window=10, threshold_uv=None, k=MAD_K,
         signal = data[:, CHANNELS.index(channel)]
 
     n_sec = len(data) // fs
-    peaks, info = detect_blink_peaks(
-        signal, fs=fs, k=k, threshold_uv=threshold_uv, refractory_s=refractory_s
-    )
+    if peaks is None:
+        peaks, info = detect_blink_peaks(
+            signal, fs=fs, k=k, threshold_uv=threshold_uv, refractory_s=refractory_s
+        )
+    elif info is None:
+        info = {}
 
     # 把每個波峰歸到它所在的那一秒
     per_second = np.zeros(n_sec, dtype=int)

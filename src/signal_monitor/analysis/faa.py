@@ -32,20 +32,16 @@ FAA（Frontal Alpha Asymmetry，前額 alpha 不對稱）分析。
 """
 import argparse
 import csv
-import os
-import re
 import sys
 
 import numpy as np
 
 # 沿用 FFT 腳本（每秒 FFT、讀檔、找最新檔）與 EI 腳本的頻帶定義
 from signal_monitor.analysis.fft_energy import (
-    BASE_DIR,
     CSV_DIR,
-    CHANNELS,
     latest_csv,
     load_eeg,
-    per_second_energy,
+    compute_band_energies,
     DEFAULT_WINDOW,
 )
 from signal_monitor.analysis.engagement import (  # 與 EI 共用頻帶定義與平滑邏輯
@@ -55,7 +51,8 @@ from signal_monitor.analysis.engagement import (  # 與 EI 共用頻帶定義與
 from signal_monitor.analysis.blink import blink_second_mask
 
 
-def compute_faa_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW):
+def compute_faa_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW,
+                       energies=None, blink_mask=None):
     """由原始 EEG 算出每秒 FAA 的陣列。
 
     FAA = ln(alpha_AF8) - ln(alpha_AF7)；alpha 能量須 > 0 才能取對數，否則該秒為 NaN。
@@ -66,8 +63,8 @@ def compute_faa_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW):
     抽出來讓 cli / overall_process 可以直接在記憶體裡取用，不必先落檔到 FAA/。
     """
     n_sec = len(data) // fs
-    energies = {ch: per_second_energy(data[:, i], fs, window=window)
-                for i, ch in enumerate(CHANNELS)}
+    if energies is None:
+        energies = compute_band_energies(data, fs, window)
     alpha_AF7 = band_energy(energies["AF7"], "alpha")
     alpha_AF8 = band_energy(energies["AF8"], "alpha")
 
@@ -75,7 +72,9 @@ def compute_faa_series(data, fs=256, reject_blinks=True, window=DEFAULT_WINDOW):
     valid = (alpha_AF7 > 0) & (alpha_AF8 > 0)
     faa[valid] = np.log(alpha_AF8[valid]) - np.log(alpha_AF7[valid])
     if reject_blinks:
-        faa[blink_second_mask(data, fs=fs)] = np.nan
+        if blink_mask is None:
+            blink_mask = blink_second_mask(data, fs=fs)
+        faa[blink_mask] = np.nan
     return faa
 
 
