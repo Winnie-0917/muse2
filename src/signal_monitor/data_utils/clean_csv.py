@@ -12,7 +12,9 @@
 --------------
   - Model/**/*.csv   boring / interesting 的訓練資料。這是人工標註整理過的，
                      不是分析產物，重跑任何步驟都生不回來，所以預設保護。
-                     要一起刪：--include-model（或 --all）
+  - PDF_Experiment/、Learn8_Experiment/
+                     控制台 [5] 實驗歸檔出來的 Features。同樣只能重做實驗才有，
+                     所以一併保護。要一起刪：--include-model（或 --all）
 
 安全機制
 --------
@@ -47,6 +49,9 @@ EXCLUDE_DIRS = {"venv", ".venv", "env", ".git", "__pycache__", ".idea", ".vscode
 RECORDINGS_DIR = "Data"    # 原始 EEG 錄製
 # 預設保護：訓練資料是人工標註整理過的，不是分析產物，重跑任何步驟都生不回來。
 MODEL_DIR = "Model"        # boring / interesting 訓練資料
+# 控制台 [5] 實驗的歸檔位置（與 EXPERIMENTS 對應）。這些也不是能重算回來的產物，
+# 少了這行，選單 [8] 會把做好的實驗資料一起清掉。
+EXPERIMENT_DIRS = ["PDF_Experiment", "Learn8_Experiment"]
 
 
 def find_csv_files(base, keep_recordings=False, include_model=False):
@@ -60,6 +65,7 @@ def find_csv_files(base, keep_recordings=False, include_model=False):
         protected.add(os.path.join(base, RECORDINGS_DIR))
     if not include_model:
         protected.add(os.path.join(base, MODEL_DIR))
+        protected.update(os.path.join(base, d) for d in EXPERIMENT_DIRS)
 
     found = []
     for root, dirs, files in os.walk(base):
@@ -121,7 +127,7 @@ def main():
     ap.add_argument("--keep-recordings", action="store_true",
                     help=f"保留 {RECORDINGS_DIR}/ 的原始錄製不刪（Features 才有辦法重建）")
     ap.add_argument("--include-model", action="store_true",
-                    help=f"連 {MODEL_DIR}/ 的訓練資料一起刪（預設保護）")
+                    help=f"連 {MODEL_DIR}/ 的訓練資料與實驗歸檔一起刪（預設保護）")
     ap.add_argument("-a", "--all", action="store_true",
                     help="連訓練資料也刪，等同 --include-model")
     args = ap.parse_args()
@@ -134,6 +140,7 @@ def main():
         kept.append(f"{RECORDINGS_DIR}/（原始錄製）")
     if not include_model:
         kept.append(f"{MODEL_DIR}/（訓練資料）")
+        kept.extend(f"{d}/（實驗歸檔）" for d in EXPERIMENT_DIRS)
     if kept:
         print(f"保護中，不會刪除：{'、'.join(kept)}")
         if not include_model:
@@ -160,7 +167,8 @@ def main():
                   f"Features 是從它重算出來的，刪掉之後只能重錄；"
                   f"要保留請加 --keep-recordings。")
         if include_model:
-            print(f"警告：這會刪掉 {MODEL_DIR}/ 的訓練資料（人工標註整理過的）。")
+            print(f"警告：這會刪掉 {MODEL_DIR}/ 的訓練資料，"
+                  f"以及 {'、'.join(EXPERIMENT_DIRS)} 的實驗歸檔。")
         try:
             ans = input(f"\n確定要刪除以上 {len(files)} 個檔案嗎？此動作無法復原。(y/N): ").strip().lower()
         except (EOFError, KeyboardInterrupt):

@@ -5,18 +5,29 @@
 
 - EEG 通道（4）：`TP9, AF7, AF8, TP10`
 - 取樣率：256 Hz，單位：微伏（µV）
-- BLE 後端：`bleak`（Linux 原生 BlueZ / D-Bus，免額外驅動、免藍牙 dongle 專屬程式）
+- BLE 後端：`bleak`（Linux 走原生 BlueZ / D-Bus，Windows 10/11 走內建 WinRT）——兩者都免額外驅動、免藍牙 dongle 專屬程式
 ---
 
 ## 一、環境安裝
 
 建立虛擬環境 `venv/`，並以**可編輯模式**安裝本套件（相依套件 `muselsl`、`bleak`、`numpy` 都寫在 `pyproject.toml`，會自動一併安裝）：
 
+**macOS / Linux**
+
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
 ```
+
+**Windows（PowerShell）**
+
+```bash
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -e .
+```
+
 
 ---
 
@@ -39,16 +50,35 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
   [1] 掃描並選擇 MUSE 裝置
   [2] 即時監控原始 EEG
   [3] 錄製資料到 Data/
-  [4] 一鍵流程：監控+錄製 → FFT → EI   (★推薦)
+  [4] 一鍵流程：監控+錄製 → FFT → Features   (★推薦)
+  [5] 實驗：選實驗類型 → 一鍵流程 → Features 自動歸檔
 分析
-  [5] 對錄製檔做每秒 FFT（只顯示摘要，不存檔）
   [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 查看 / 管理
-  [7] 查看數據（訊號摘要 / EI / FAA / FFT 主頻與頻帶能量）
-  [8] 刪除 CSV（Data/、Features/；保留 Model/ 訓練資料）
+  [7] 查看數據（訊號摘要 / EI / FAA / FFT；每秒 FFT 明細在子選單 [5]）
+  [8] 刪除 CSV（Data/、Features/；保留實驗歸檔資料）
   [9] 查看原始數據（選 Features 或 FFT 的 csv，如 cat 直接印出）
   [0] 離開
 ```
+
+### 選單 [5] 實驗
+
+選一種實驗後跑的就是一鍵流程（錄製 → FFT → Features），只是最後多一步：
+把算好的 `Features/<編號>.csv` **複製**一份到該實驗的資料夾，並改成帶受測者編號的檔名。
+
+| 實驗 | 歸檔位置 | 檔名 |
+|---|---|---|
+| 無聊實驗 | `Model/boring/` | `boring_S<i>.csv` |
+| 有趣實驗 | `Model/interesting/` | `interesting_S<i>.csv` |
+| PDF 實驗 | `PDF_Experiment/` | `PDF_S<i>.csv` |
+| Learn8 實驗 | `Learn8_Experiment/` | `Learn8_S<i>.csv` |
+
+- `<i>` 是受測者編號，每個資料夾各自依序遞增。編號取法跟 `Model/model_utils.py`
+  一致——**檔名裡第一個數字就是受測者編號**，所以舊的 `1.csv` 與新的 `boring_S1.csv`
+  都算 S1，接續編號時不會撞在一起。
+- **原始錄製不變**：依舊落在 `Data/<編號>.csv`（流水號），`Features/<編號>.csv` 也會保留。
+- 歸檔用複製不是搬移，實驗分類選錯時只要刪掉歸檔的那份重做即可。
+- 這四個資料夾都已加入選單 [8] 的保護名單，清 CSV 時不會被連帶刪掉。
 
 
 畫面範例：
