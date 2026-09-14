@@ -216,8 +216,8 @@ def do_ei():
 EXPERIMENTS = {
     "1": ("無聊實驗",    os.path.join(BASE_DIR, "Model", "boring"),      "boring_S"),
     "2": ("有趣實驗",    os.path.join(BASE_DIR, "Model", "interesting"), "interesting_S"),
-    "3": ("PDF 實驗",    os.path.join(BASE_DIR, "PDF_Experiment"),       "PDF_S"),
-    "4": ("Learn8 實驗", os.path.join(BASE_DIR, "Learn8_Experiment"),    "Learn8_S"),
+    "3": ("PDF 實驗",    os.path.join(BASE_DIR, "Model", "PDF_Experiment"),    "PDF_S"),
+    "4": ("Learn8 實驗", os.path.join(BASE_DIR, "Model", "Learn8_Experiment"), "Learn8_S"),
 }
 
 

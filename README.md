@@ -70,15 +70,16 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
 |---|---|---|
 | 無聊實驗 | `Model/boring/` | `boring_S<i>.csv` |
 | 有趣實驗 | `Model/interesting/` | `interesting_S<i>.csv` |
-| PDF 實驗 | `PDF_Experiment/` | `PDF_S<i>.csv` |
-| Learn8 實驗 | `Learn8_Experiment/` | `Learn8_S<i>.csv` |
+| PDF 實驗 | `Model/PDF_Experiment/` | `PDF_S<i>.csv` |
+| Learn8 實驗 | `Model/Learn8_Experiment/` | `Learn8_S<i>.csv` |
 
 - `<i>` 是受測者編號，每個資料夾各自依序遞增。編號取法跟 `Model/model_utils.py`
   一致——**檔名裡第一個數字就是受測者編號**，所以舊的 `1.csv` 與新的 `boring_S1.csv`
   都算 S1，接續編號時不會撞在一起。
 - **原始錄製不變**：依舊落在 `Data/<編號>.csv`（流水號），`Features/<編號>.csv` 也會保留。
 - 歸檔用複製不是搬移，實驗分類選錯時只要刪掉歸檔的那份重做即可。
-- 這四個資料夾都已加入選單 [8] 的保護名單，清 CSV 時不會被連帶刪掉。
+- 四個資料夾都在 `Model/` 底下，而 `Model/` 是選單 [8] 預設保護的，
+  清 CSV 時不會被連帶刪掉（要連這些一起刪得加 `--include-model`）。
 
 
 畫面範例：
@@ -311,9 +312,11 @@ muse2/
 ├── README.md
 ├── Data/                     # 原始 EEG 錄製（.csv 由 .gitignore 忽略）
 ├── Features/                 # EI / FAA / 眨眼 合併輸出，也是模型的輸入
-├── Model/                    # 無聊/有趣 分類模型
-│   ├── boring/k.csv          # 受測者 k 的絕對無聊任務錄製（y=0）
-│   ├── interesting/k.csv     # 受測者 k 的絕對不無聊任務錄製（y=1）
+├── Model/                    # 無聊/有趣 分類模型＋實驗歸檔
+│   ├── boring/boring_S<i>.csv          # 受測者 i 的絕對無聊任務（y=0）
+│   ├── interesting/interesting_S<i>.csv # 受測者 i 的絕對不無聊任務（y=1）
+│   ├── PDF_Experiment/PDF_S<i>.csv     # PDF 實驗（無標籤，預測用）
+│   ├── Learn8_Experiment/Learn8_S<i>.csv # Learn8 實驗（無標籤，預測用）
 │   ├── model_utils.py        # 資料載入、受測者分組、Z-score 標準化
 │   ├── train_model.py        # 訓練 + Leave-One-Subject-Out 交叉驗證
 │   ├── predict_model.py      # 輸出一段錄製的 P(有趣)
