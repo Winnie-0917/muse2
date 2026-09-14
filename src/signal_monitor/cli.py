@@ -15,6 +15,7 @@ Data/ 與 Features/ 內的 CSV 算給你看。
 """
 import os
 import re
+import shutil
 import subprocess
 import traceback
 import sys
@@ -207,6 +208,89 @@ def do_ei():
 
     sort_features_csv_by_second(features_path)
     print(f"{GREEN}已輸出 {n_sec} 秒的結果至 {features_path}{RESET}")
+
+
+# ---------- 實驗 ----------
+# 每種實驗的 Features 要歸檔到哪、檔名前綴是什麼。
+# 原始錄製一律還是留在 Data/<編號>.csv，命名規則不變。
+EXPERIMENTS = {
+    "1": ("無聊實驗",    os.path.join(BASE_DIR, "Model", "boring"),      "boring_S"),
+    "2": ("有趣實驗",    os.path.join(BASE_DIR, "Model", "interesting"), "interesting_S"),
+    "3": ("PDF 實驗",    os.path.join(BASE_DIR, "PDF_Experiment"),       "PDF_S"),
+    "4": ("Learn8 實驗", os.path.join(BASE_DIR, "Learn8_Experiment"),    "Learn8_S"),
+}
+
+
+def next_subject_index(folder):
+    """回傳這個實驗資料夾的下一個受測者編號。
+
+    先認新命名結尾的 _S<編號>，認不出來才退回「檔名裡第一個數字」——
+    也就是 Model/model_utils.py 的 subject_from_filename 規則，讓舊的
+    boring/1.csv 與新的 boring_S1.csv 都算 S1，接續編號時不會撞在一起。
+
+    順序不能反過來：Learn8_S1 用「第一個數字」會抓到 Learn8 的 8，
+    整個資料夾的編號就會從 S9 開始跳號。
+    """
+    if not os.path.isdir(folder):
+        return 1
+    used = []
+    for name in os.listdir(folder):
+        if not name.endswith(".csv"):
+            continue
+        stem = os.path.splitext(name)[0]
+        m = re.search(r"_S(\d+)$", stem, re.IGNORECASE) or re.search(r"(\d+)", stem)
+        if m:
+            used.append(int(m.group(1)))
+    return (max(used) + 1) if used else 1
+
+def do_experiment():
+    """選實驗類型 -> 跑一鍵流程 -> 把 Features 歸檔到該實驗的資料夾。
+
+    一鍵流程本身不變（錄製 -> FFT -> Features），這裡只是多一步：把算好的
+    Features/<編號>.csv 另存一份到實驗資料夾，並改成帶受測者編號的檔名。
+    用複製而非搬移，Features/ 仍保有一份，重跑分析或改用別的實驗分類都還有得救。
+    """
+    print(f"{BOLD}{CYAN}== 實驗 =={RESET}\n")
+    print("要做哪一種實驗？（Features 會自動歸檔到對應資料夾）\n")
+    for key in sorted(EXPERIMENTS):
+        label, folder, prefix = EXPERIMENTS[key]
+        rel = os.path.relpath(folder, BASE_DIR).replace(os.sep, "/")
+        print(f"  [{key}] {label:<11} -> {rel}/{prefix}{next_subject_index(folder)}.csv")
+
+    sel = ask("\n請選擇（Enter 取消）：")
+    if sel not in EXPERIMENTS:
+        print(f"{YELLOW}已取消，未進行任何實驗。{RESET}")
+        return
+    label, folder, prefix = EXPERIMENTS[sel]
+
+    secs = ask(f"{label}要錄幾秒？（建議 ≥10；Enter = 錄到 Ctrl+C）：", default="0")
+
+    # 先記下目前的錄製檔，跑完再比對差集，才知道這次新產生的是哪一個編號。
+    before = set(list_recordings())
+    print(f"\n{CYAN}開始「{label}」的一鍵流程…{RESET}")
+    run_module("signal_monitor.overall_process", *device_args(), "--seconds", secs)
+
+    new_files = sorted(set(list_recordings()) - before, key=lambda x: int(x[:-4]))
+    if not new_files:
+        print(f"\n{YELLOW}這次沒有產生新的錄製檔（可能連線失敗或中途取消），略過歸檔。{RESET}")
+        return
+
+    stem = new_files[-1][:-4]
+    features_path = os.path.join(FEATURES_DIR, f"{stem}.csv")
+    if not os.path.exists(features_path):
+        print(f"\n{YELLOW}已錄到 Data/{stem}.csv，但沒有對應的 Features"
+              f"（錄不到 1 秒或分析被中斷），略過歸檔。{RESET}")
+        print(f"{DIM}可以先用選單 [6] 對 {stem}.csv 補算 Features，再重跑一次本選項歸檔。{RESET}")
+        return
+
+    os.makedirs(folder, exist_ok=True)
+    index = next_subject_index(folder)
+    dest = os.path.join(folder, f"{prefix}{index}.csv")
+    shutil.copy2(features_path, dest)
+
+    rel_dest = os.path.relpath(dest, BASE_DIR).replace(os.sep, "/")
+    print(f"\n{GREEN}已歸檔至 {rel_dest}（S{index}）{RESET}")
+    print(f"{DIM}原始錄製：Data/{stem}.csv　中繼結果：Features/{stem}.csv（皆保留）{RESET}")
 
 
 def do_clean():
@@ -402,6 +486,7 @@ def do_view_data():
         print("  [2] 查看 EI 專注度結果")
         print("  [3] 查看 FFT 主頻與頻帶能量（即時計算）")
         print("  [4] 查看 FAA 前額 alpha 不對稱")
+        print("  [5] 每秒 FFT 明細（逐秒列出，不存檔）")
         print("  [0] 返回主選單")
         c = ask("\n請選擇：")
         if c == "1":
@@ -412,6 +497,8 @@ def do_view_data():
             clear(); view_fft_peaks(); pause()
         elif c == "4":
             clear(); view_faa_result(); pause()
+        elif c == "5":
+            clear(); do_fft(); pause()
         elif c in ("0", None, "q"):
             return
         else:
@@ -429,14 +516,14 @@ MENU = f"""{BOLD}{CYAN}============================================
    [2] 即時監控原始 EEG
    [3] 錄製資料到 Data/
    [4] 一鍵流程：監控+錄製 → FFT → Features  {DIM}(★推薦){RESET}
+   [5] 實驗：選實驗類型 → 一鍵流程 → Features 自動歸檔
 
  {BOLD}分析{RESET}
-   [5] 對錄製檔做每秒 FFT（只顯示摘要，不存檔）
-    [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
+   [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 
  {BOLD}查看 / 管理{RESET}
    [7] 查看數據（訊號摘要 / EI / FAA / FFT）
-   [8] 刪除 CSV（Data/、Features/；保留 Model/ 訓練資料）
+   [8] 刪除 CSV（Data/、Features/；保留實驗歸檔資料）
    [9] 查看 Features 原始內容
    [0] 離開
 {DIM}--------------------------------------------{RESET}"""
@@ -445,7 +532,7 @@ MENU = f"""{BOLD}{CYAN}============================================
 def main():
     actions = {
         "1": do_scan, "2": do_monitor, "3": do_record, "4": do_pipeline,
-        "5": do_fft, "6": do_ei, "7": do_view_data, "8": do_clean, "9": do_cat,
+        "5": do_experiment, "6": do_ei, "7": do_view_data, "8": do_clean, "9": do_cat,
     }
     while True:
         clear()
