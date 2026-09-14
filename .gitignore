@@ -19,6 +19,10 @@ Data/*
 eeg_*.csv
 *.csv
 
+# 但訓練用的標註資料要上傳（檔案很小，方便重現訓練結果）
+!Model/boring/*.csv
+!Model/interesting/*.csv
+
 # 作業系統 / 編輯器
 .DS_Store
 .idea/
