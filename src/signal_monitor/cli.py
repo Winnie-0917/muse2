@@ -212,7 +212,8 @@ def do_ei():
 
 # ---------- 實驗 ----------
 # 每種實驗的 Features 要歸檔到哪、檔名前綴是什麼。
-# 原始錄製一律還是留在 Data/<編號>.csv，命名規則不變。
+# 原始錄製一律還是留在 Data/<編號>.csv，流水號規則不變；歸檔時會再用同一個實驗
+# 檔名另存一份 Data/<實驗檔名>_Original.csv，讓原始資料與 Features 成對保存。
 EXPERIMENTS = {
     "1": ("無聊實驗",    os.path.join(BASE_DIR, "Model", "boring"),      "boring_S"),
     "2": ("有趣實驗",    os.path.join(BASE_DIR, "Model", "interesting"), "interesting_S"),
@@ -243,15 +244,45 @@ def next_subject_index(folder):
             used.append(int(m.group(1)))
     return (max(used) + 1) if used else 1
 
-def do_experiment():
-    """選實驗類型 -> 跑一鍵流程 -> 把 Features 歸檔到該實驗的資料夾。
 
-    一鍵流程本身不變（錄製 -> FFT -> Features），這裡只是多一步：把算好的
-    Features/<編號>.csv 另存一份到實驗資料夾，並改成帶受測者編號的檔名。
-    用複製而非搬移，Features/ 仍保有一份，重跑分析或改用別的實驗分類都還有得救。
+# 實驗歸檔時，原始錄製在 Data/ 另存一份所用的檔名後綴。
+# 刻意不是流水號：Data/boring_S1_Original.csv 一眼就對得上
+# Model/boring/boring_S1.csv，不必回頭查當時的錄製編號。
+ORIGINAL_SUFFIX = "_Original"
+
+
+def original_dest_path(archive_stem):
+    """回傳 Data/<實驗檔名>_Original.csv 的可用路徑。
+
+    正常情況下 archive_stem（例如 boring_S1）是 Model/ 裡的新編號，Data/ 不會有同名檔。
+    但若 Model/ 的歸檔被刪掉、Data/ 的原始檔還在，編號會重新從 S1 算起而撞名——
+    這時往後找 _2、_3，寧可多留一個檔，也不要覆蓋掉上一次實驗的原始資料。
+
+    檔名不是純數字，而 list_recordings() 與 next_csv_path() 都只認純數字檔名，
+    所以這份另存檔不會被當成錄製檔，也不會打亂 Data/ 的流水號。
+    """
+    base = os.path.join(CSV_DIR, f"{archive_stem}{ORIGINAL_SUFFIX}")
+    path = f"{base}.csv"
+    n = 2
+    while os.path.exists(path):
+        path = f"{base}_{n}.csv"
+        n += 1
+    return path
+
+
+def do_experiment():
+    """選實驗類型 -> 跑一鍵流程 -> 把 Features 與原始錄製一起歸檔。
+
+    一鍵流程本身不變（錄製 -> FFT -> Features），這裡多兩步：
+      1. Features/<編號>.csv 另存一份到實驗資料夾，改成帶受測者編號的檔名。
+      2. Data/<編號>.csv（原始 EEG）也用同一個實驗檔名另存成
+         Data/<實驗檔名>_Original.csv，讓原始資料與 Features 成對保存。
+
+    兩步都是複製而非搬移，Data/ 與 Features/ 的流水號檔各自仍保有一份，
+    重跑分析或改用別的實驗分類都還有得救。
     """
     print(f"{BOLD}{CYAN}== 實驗 =={RESET}\n")
-    print("要做哪一種實驗？（Features 會自動歸檔到對應資料夾）\n")
+    print("要做哪一種實驗？（Features 自動歸檔，原始資料自動存成 _Original.csv）\n")
     for key in sorted(EXPERIMENTS):
         label, folder, prefix = EXPERIMENTS[key]
         rel = os.path.relpath(folder, BASE_DIR).replace(os.sep, "/")
@@ -285,12 +316,28 @@ def do_experiment():
 
     os.makedirs(folder, exist_ok=True)
     index = next_subject_index(folder)
-    dest = os.path.join(folder, f"{prefix}{index}.csv")
+    archive_stem = f"{prefix}{index}"
+    dest = os.path.join(folder, f"{archive_stem}.csv")
     shutil.copy2(features_path, dest)
+
+    # 原始 EEG 也用同一個實驗檔名保存一份：看到 Model/boring/boring_S1.csv，
+    # 就知道對應的原始資料是 Data/boring_S1_Original.csv，不必回頭查錄製編號。
+    # 選單 [8] 清 CSV 時，*_Original.csv 與 Model/ 的歸檔一樣預設受保護。
+    original_dest = original_dest_path(archive_stem)
+    try:
+        shutil.copy2(os.path.join(CSV_DIR, f"{stem}.csv"), original_dest)
+    except OSError as exc:
+        # 原始檔沒存成不影響已歸檔好的 Features，提醒流水號那份還在就好。
+        print(f"\n{YELLOW}原始資料另存失敗：{exc}{RESET}")
+        print(f"{DIM}Features 已歸檔，原始錄製仍在 Data/{stem}.csv。{RESET}")
+        original_dest = None
 
     rel_dest = os.path.relpath(dest, BASE_DIR).replace(os.sep, "/")
     print(f"\n{GREEN}已歸檔至 {rel_dest}（S{index}）{RESET}")
-    print(f"{DIM}原始錄製：Data/{stem}.csv　中繼結果：Features/{stem}.csv（皆保留）{RESET}")
+    if original_dest:
+        rel_original = os.path.relpath(original_dest, BASE_DIR).replace(os.sep, "/")
+        print(f"{GREEN}原始資料已保存至 {rel_original}{RESET}")
+    print(f"{DIM}錄製流水號：Data/{stem}.csv　中繼結果：Features/{stem}.csv（皆保留）{RESET}")
 
 
 def do_clean():
@@ -516,14 +563,14 @@ MENU = f"""{BOLD}{CYAN}============================================
    [2] 即時監控原始 EEG
    [3] 錄製資料到 Data/
    [4] 一鍵流程：監控+錄製 → FFT → Features  {DIM}(★推薦){RESET}
-   [5] 實驗：選實驗類型 → 一鍵流程 → Features 自動歸檔
+   [5] 實驗：選實驗類型 → 一鍵流程 → Features + 原始資料自動歸檔
 
  {BOLD}分析{RESET}
    [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 
  {BOLD}查看 / 管理{RESET}
    [7] 查看數據（訊號摘要 / EI / FAA / FFT）
-   [8] 刪除 CSV（Data/、Features/；保留實驗歸檔資料）
+   [8] 刪除 CSV（Data/、Features/；保留實驗歸檔與 _Original 原始資料）
    [9] 查看 Features 原始內容
    [0] 離開
 {DIM}--------------------------------------------{RESET}"""

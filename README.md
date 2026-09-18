@@ -51,35 +51,46 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
   [2] 即時監控原始 EEG
   [3] 錄製資料到 Data/
   [4] 一鍵流程：監控+錄製 → FFT → Features   (★推薦)
-  [5] 實驗：選實驗類型 → 一鍵流程 → Features 自動歸檔
+  [5] 實驗：選實驗類型 → 一鍵流程 → Features + 原始資料自動歸檔
 分析
   [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 查看 / 管理
   [7] 查看數據（訊號摘要 / EI / FAA / FFT；每秒 FFT 明細在子選單 [5]）
-  [8] 刪除 CSV（Data/、Features/；保留實驗歸檔資料）
+  [8] 刪除 CSV（Data/、Features/；保留實驗歸檔與 _Original 原始資料）
   [9] 查看原始數據（選 Features 或 FFT 的 csv，如 cat 直接印出）
   [0] 離開
 ```
 
 ### 選單 [5] 實驗
 
-選一種實驗後跑的就是一鍵流程（錄製 → FFT → Features），只是最後多一步：
-把算好的 `Features/<編號>.csv` **複製**一份到該實驗的資料夾，並改成帶受測者編號的檔名。
+選一種實驗後跑的就是一鍵流程（錄製 → FFT → Features），只是最後多兩步：
 
-| 實驗 | 歸檔位置 | 檔名 |
-|---|---|---|
-| 無聊實驗 | `Model/boring/` | `boring_S<i>.csv` |
-| 有趣實驗 | `Model/interesting/` | `interesting_S<i>.csv` |
-| PDF 實驗 | `Model/PDF_Experiment/` | `PDF_S<i>.csv` |
-| Learn8 實驗 | `Model/Learn8_Experiment/` | `Learn8_S<i>.csv` |
+1. 把算好的 `Features/<編號>.csv` **複製**一份到該實驗的資料夾，並改成帶受測者編號的檔名。
+2. 把 `Data/<編號>.csv`（原始 EEG）也用**同一個實驗檔名**複製一份成
+   `Data/<實驗檔名>_Original.csv`，讓原始資料與 Features 成對保存。
+
+| 實驗 | Features 歸檔位置 | 檔名 | 原始資料保存 |
+|---|---|---|---|
+| 無聊實驗 | `Model/boring/` | `boring_S<i>.csv` | `Data/boring_S<i>_Original.csv` |
+| 有趣實驗 | `Model/interesting/` | `interesting_S<i>.csv` | `Data/interesting_S<i>_Original.csv` |
+| PDF 實驗 | `Model/PDF_Experiment/` | `PDF_S<i>.csv` | `Data/PDF_S<i>_Original.csv` |
+| Learn8 實驗 | `Model/Learn8_Experiment/` | `Learn8_S<i>.csv` | `Data/Learn8_S<i>_Original.csv` |
 
 - `<i>` 是受測者編號，每個資料夾各自依序遞增。編號取法跟 `Model/model_utils.py`
   一致——**檔名裡第一個數字就是受測者編號**，所以舊的 `1.csv` 與新的 `boring_S1.csv`
   都算 S1，接續編號時不會撞在一起。
-- **原始錄製不變**：依舊落在 `Data/<編號>.csv`（流水號），`Features/<編號>.csv` 也會保留。
+- **流水號檔不變**：`Data/<編號>.csv` 與 `Features/<編號>.csv` 都照舊保留，
+  `_Original.csv` 是**額外**複製的一份，不是搬移。
+- `_Original.csv` 的檔名不是純數字，不會被當成錄製檔，因此不影響 `Data/` 的流水號，
+  在選單 [3] / [7] 的錄製清單裡也不會出現。
+- 萬一 `Model/` 的歸檔被刪掉、編號重新從 S1 算起而撞名，會自動往後改成
+  `_Original_2.csv`、`_Original_3.csv`，不會覆蓋掉上一次實驗的原始資料。
 - 歸檔用複製不是搬移，實驗分類選錯時只要刪掉歸檔的那份重做即可。
-- 四個資料夾都在 `Model/` 底下，而 `Model/` 是選單 [8] 預設保護的，
-  清 CSV 時不會被連帶刪掉（要連這些一起刪得加 `--include-model`）。
+- 四個資料夾都在 `Model/` 底下，而 `Model/` 是選單 [8] 預設保護的；
+  `Data/*_Original.csv` 同樣預設保護，清 CSV 時不會被連帶刪掉
+  （要連這些一起刪得加 `--include-model`）。
+- `Data/*.csv` 會一起上傳到 GitHub（含 `_Original.csv`），實驗的原始資料與歸檔都留在版控裡。
+  原始錄製每分鐘約 0.8 MB，repo 會隨實驗次數持續變大，留意一下容量。
 
 
 畫面範例：
@@ -310,7 +321,9 @@ EI/FAA 則直接併進 Features。存起來又大又沒人讀，要看的時候�
 muse2/
 ├── pyproject.toml            # 專案設定與相依套件（取代 requirements.txt）
 ├── README.md
-├── Data/                     # 原始 EEG 錄製（.csv 由 .gitignore 忽略）
+├── Data/                     # 原始 EEG 錄製（.csv 會上傳到版控）
+│   ├── <編號>.csv                      # 一般錄製（流水號）
+│   └── <實驗檔名>_Original.csv         # 選單 [5] 實驗保存的原始資料
 ├── Features/                 # EI / FAA / 眨眼 合併輸出，也是模型的輸入
 ├── Model/                    # 無聊/有趣 分類模型＋實驗歸檔
 │   ├── boring/boring_S<i>.csv          # 受測者 i 的絕對無聊任務（y=0）

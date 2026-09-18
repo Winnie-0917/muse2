@@ -10,6 +10,8 @@
 
 預設**不會**碰
 --------------
+  - Data/*_Original.csv  控制台 [5] 實驗保存的原始 EEG。它與 Model/ 的歸檔成對，
+                     是那次實驗唯一的原始資料，刪掉只能重做實驗，所以預設保護。
   - Model/**/*.csv   boring / interesting 的訓練資料。這是人工標註整理過的，
                      不是分析產物，重跑任何步驟都生不回來，所以預設保護。
                      控制台 [5] 歸檔的 PDF_Experiment/ 與 Learn8_Experiment/ 也在 Model/
@@ -31,7 +33,7 @@
     python -m signal_monitor.data_utils.clean_csv --dry-run         # 只預覽、不刪除
     python -m signal_monitor.data_utils.clean_csv -y                # 不詢問，直接刪除
     python -m signal_monitor.data_utils.clean_csv --keep-recordings # 保留 Data/ 的原始錄製
-    python -m signal_monitor.data_utils.clean_csv --all             # 連訓練資料也刪
+    python -m signal_monitor.data_utils.clean_csv --all             # 連訓練資料與原始保存檔也刪
 """
 import argparse
 import os
@@ -47,6 +49,10 @@ BASE_DIR = PROJECT_ROOT
 EXCLUDE_DIRS = {"venv", ".venv", "env", ".git", "__pycache__", ".idea", ".vscode"}
 
 RECORDINGS_DIR = "Data"    # 原始 EEG 錄製
+# 控制台 [5] 實驗歸檔時另存的原始 EEG：Data/<實驗檔名>_Original.csv
+#（撞名時會是 _Original_2.csv、_Original_3.csv）。與 Model/ 的歸檔成對，
+# 跟著訓練資料一起受 --include-model 管轄，不會被一般的清 CSV 掃掉。
+ORIGINAL_RE = re.compile(r"_Original(_\d+)?\.csv$", re.IGNORECASE)
 # 預設保護：訓練資料是人工標註整理過的，不是分析產物，重跑任何步驟都生不回來。
 # boring / interesting 訓練資料，以及控制台 [5] 歸檔的 PDF_Experiment/、
 # Learn8_Experiment/。整個 Model/ 一起保護，新增實驗分類時不用再改這裡。
@@ -56,8 +62,10 @@ MODEL_DIR = "Model"
 def find_csv_files(base, keep_recordings=False, include_model=False):
     """回傳 base 底下可刪除的 .csv 絕對路徑。
 
-    預設刪掉除了 Model/（訓練資料）以外的所有 .csv，包含 Data/ 的原始錄製。
-    keep_recordings=True 時額外保住 Data/；include_model=True 時連訓練資料也刪。
+    預設刪掉除了 Model/（訓練資料）與 *_Original.csv（實驗保存的原始 EEG）
+    以外的所有 .csv，包含 Data/ 的流水號錄製。
+    keep_recordings=True 時額外保住 Data/；include_model=True 時連訓練資料與
+    *_Original.csv 也刪。
     """
     protected = set()
     if keep_recordings:
@@ -72,8 +80,12 @@ def find_csv_files(base, keep_recordings=False, include_model=False):
         if any(root == p or root.startswith(p + os.sep) for p in protected):
             continue
         for name in files:
-            if name.lower().endswith(".csv"):
-                found.append(os.path.join(root, name))
+            if not name.lower().endswith(".csv"):
+                continue
+            # 實驗保存的原始 EEG 與 Model/ 的歸檔成對，受同一個開關保護
+            if not include_model and ORIGINAL_RE.search(name):
+                continue
+            found.append(os.path.join(root, name))
     return sorted(found)
 
 
@@ -125,7 +137,7 @@ def main():
     ap.add_argument("--keep-recordings", action="store_true",
                     help=f"保留 {RECORDINGS_DIR}/ 的原始錄製不刪（Features 才有辦法重建）")
     ap.add_argument("--include-model", action="store_true",
-                    help=f"連 {MODEL_DIR}/ 的訓練資料與實驗歸檔一起刪（預設保護）")
+                    help=f"連 {MODEL_DIR}/ 的訓練資料、實驗歸檔與 *_Original.csv 一起刪（預設保護）")
     ap.add_argument("-a", "--all", action="store_true",
                     help="連訓練資料也刪，等同 --include-model")
     args = ap.parse_args()
@@ -138,6 +150,7 @@ def main():
         kept.append(f"{RECORDINGS_DIR}/（原始錄製）")
     if not include_model:
         kept.append(f"{MODEL_DIR}/（訓練資料與實驗歸檔）")
+        kept.append("*_Original.csv（實驗保存的原始 EEG）")
     if kept:
         print(f"保護中，不會刪除：{'、'.join(kept)}")
         if not include_model:
@@ -164,7 +177,8 @@ def main():
                   f"Features 是從它重算出來的，刪掉之後只能重錄；"
                   f"要保留請加 --keep-recordings。")
         if include_model:
-            print(f"警告：這會刪掉 {MODEL_DIR}/ 的訓練資料與實驗歸檔。")
+            print(f"警告：這會刪掉 {MODEL_DIR}/ 的訓練資料、實驗歸檔"
+                  f"與實驗保存的 *_Original.csv 原始 EEG。")
         try:
             ans = input(f"\n確定要刪除以上 {len(files)} 個檔案嗎？此動作無法復原。(y/N): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
