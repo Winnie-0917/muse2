@@ -23,7 +23,9 @@ import sys
 import numpy as np
 
 # 重用既有模組的路徑與函式
-from signal_monitor.data_utils.record_csv import CSV_DIR, next_csv_path  # noqa: F401  (next_csv_path 供未來擴充)
+from signal_monitor.data_utils.record_csv import (  # noqa: F401  (next_csv_path 供未來擴充)
+    CSV_DIR, next_csv_path, ORIGINAL_SUFFIX, ORIGINAL_RE,
+)
 from signal_monitor.analysis.fft_energy import (
     BASE_DIR, CHANNELS, load_eeg, per_second_energy,
 )
@@ -111,12 +113,29 @@ def device_args():
     return []
 
 
+def name_order(name):
+    """排序鍵：流水號在前（依數字大小），其餘檔名在後（依字母）。
+
+    Data/ 與 Features/ 都可能同時有 <編號>.csv 與 <實驗檔名>_Original.csv，
+    純數字排序會對後者丟 ValueError，所以兩種檔名共用這個鍵。
+    """
+    stem = name[:-4]
+    return (0, int(stem), "") if stem.isdigit() else (1, 0, stem.lower())
+
+
 def list_recordings():
-    """回傳 Data/ 內的 <編號>.csv 檔名，依編號排序。"""
+    """回傳 Data/ 內的錄製檔，流水號在前、實驗保存的 _Original 在後。
+
+    Data/ 有兩種錄製檔：<編號>.csv 是 [3] / [4] 產生的流水號，
+    <實驗檔名>_Original.csv 則是 [5] 實驗把原始 EEG 改名保存的那份。
+    兩種都是可以重算的原始 EEG，所以 [6] / [7] 都要看得到——
+    實驗跑完 Data/ 只剩 _Original 那份，漏掉就等於找不到原始資料了。
+    """
     if not os.path.isdir(CSV_DIR):
         return []
-    files = [f for f in os.listdir(CSV_DIR) if re.match(r"^\d+\.csv$", f)]
-    return sorted(files, key=lambda x: int(x[:-4]))
+    files = [f for f in os.listdir(CSV_DIR)
+             if re.match(r"^\d+\.csv$", f) or ORIGINAL_RE.search(f)]
+    return sorted(files, key=name_order)
 
 
 def count_rows(path):
@@ -128,12 +147,13 @@ def choose_recording(prompt_default_last=True):
     """列出錄製檔讓使用者選；Enter 預設選最後（最新）一個。回傳完整路徑或 None。"""
     files = list_recordings()
     if not files:
-        print(f"{YELLOW}Data/ 內沒有任何錄製檔（<編號>.csv）。先錄一段吧。{RESET}")
+        print(f"{YELLOW}Data/ 內沒有任何錄製檔（<編號>.csv 或 <實驗檔名>_Original.csv）。"
+              f"先錄一段吧。{RESET}")
         return None
     print(f"{BOLD}Data/ 內的錄製檔：{RESET}")
     for i, f in enumerate(files):
         n = count_rows(os.path.join(CSV_DIR, f))
-        print(f"  [{i}] {f:<10} 約 {n/256:6.1f} 秒 （{n} 樣本）")
+        print(f"  [{i}] {f:<32} 約 {n/256:6.1f} 秒 （{n} 樣本）")
     default = files[-1] if prompt_default_last else None
     sel = ask(f"選擇編號（Enter = 最新 {default}）：", default="__last__")
     if sel == "__last__":
@@ -212,8 +232,8 @@ def do_ei():
 
 # ---------- 實驗 ----------
 # 每種實驗的 Features 要歸檔到哪、檔名前綴是什麼。
-# 原始錄製一律還是留在 Data/<編號>.csv，流水號規則不變；歸檔時會再用同一個實驗
-# 檔名另存一份 Data/<實驗檔名>_Original.csv，讓原始資料與 Features 成對保存。
+# 原始錄製會被「改名保存」成 Data/<實驗檔名>_Original.csv：搬移而非複製，
+# Data/ 不再留下流水號那份，同一段錄製不會在 Data/ 裡存兩次。
 EXPERIMENTS = {
     "1": ("無聊實驗",    os.path.join(BASE_DIR, "Model", "boring"),      "boring_S"),
     "2": ("有趣實驗",    os.path.join(BASE_DIR, "Model", "interesting"), "interesting_S"),
@@ -245,21 +265,16 @@ def next_subject_index(folder):
     return (max(used) + 1) if used else 1
 
 
-# 實驗歸檔時，原始錄製在 Data/ 另存一份所用的檔名後綴。
-# 刻意不是流水號：Data/boring_S1_Original.csv 一眼就對得上
-# Model/boring/boring_S1.csv，不必回頭查當時的錄製編號。
-ORIGINAL_SUFFIX = "_Original"
-
 
 def original_dest_path(archive_stem):
     """回傳 Data/<實驗檔名>_Original.csv 的可用路徑。
 
     正常情況下 archive_stem（例如 boring_S1）是 Model/ 裡的新編號，Data/ 不會有同名檔。
-    但若 Model/ 的歸檔被刪掉、Data/ 的原始檔還在，編號會重新從 S1 算起而撞名——
-    這時往後找 _2、_3，寧可多留一個檔，也不要覆蓋掉上一次實驗的原始資料。
+    但若 Model/ 的歸檔被刪掉、編號重新從 S1 算起而撞名——這時往後找 _2、_3，
+    寧可多留一個檔，也不要覆蓋掉上一次實驗的原始資料。
 
-    檔名不是純數字，而 list_recordings() 與 next_csv_path() 都只認純數字檔名，
-    所以這份另存檔不會被當成錄製檔，也不會打亂 Data/ 的流水號。
+    檔名不是純數字，next_csv_path() 只認純數字，所以這份檔不會佔用流水號；
+    list_recordings() 則另外認得它，[6] / [7] 依然選得到這段原始資料。
     """
     base = os.path.join(CSV_DIR, f"{archive_stem}{ORIGINAL_SUFFIX}")
     path = f"{base}.csv"
@@ -274,12 +289,11 @@ def do_experiment():
     """選實驗類型 -> 跑一鍵流程 -> 把 Features 與原始錄製一起歸檔。
 
     一鍵流程本身不變（錄製 -> FFT -> Features），這裡多兩步：
-      1. Features/<編號>.csv 另存一份到實驗資料夾，改成帶受測者編號的檔名。
-      2. Data/<編號>.csv（原始 EEG）也用同一個實驗檔名另存成
-         Data/<實驗檔名>_Original.csv，讓原始資料與 Features 成對保存。
+      1. Features/<編號>.csv 複製一份到實驗資料夾，改成帶受測者編號的檔名。
+      2. Data/<編號>.csv（原始 EEG）改名搬移成 Data/<實驗檔名>_Original.csv。
 
-    兩步都是複製而非搬移，Data/ 與 Features/ 的流水號檔各自仍保有一份，
-    重跑分析或改用別的實驗分類都還有得救。
+    第 2 步是搬移不是複製：Data/ 不留流水號那份，同一段原始 EEG 不會存兩次。
+    Features/<編號>.csv 仍照舊保留，實驗分類選錯時刪掉歸檔那份重做即可。
     """
     print(f"{BOLD}{CYAN}== 實驗 =={RESET}\n")
     print("要做哪一種實驗？（Features 自動歸檔，原始資料自動存成 _Original.csv）\n")
@@ -301,7 +315,10 @@ def do_experiment():
     print(f"\n{CYAN}開始「{label}」的一鍵流程…{RESET}")
     run_module("signal_monitor.overall_process", *device_args(), "--seconds", secs)
 
-    new_files = sorted(set(list_recordings()) - before, key=lambda x: int(x[:-4]))
+    # 這次新產生的錄製一定是流水號檔（overall_process 錄的），先濾掉 _Original，
+    # 否則上一次實驗搬過來的檔案會混進差集，算錯這次的編號。
+    new_files = sorted((f for f in set(list_recordings()) - before if f[:-4].isdigit()),
+                       key=lambda x: int(x[:-4]))
     if not new_files:
         print(f"\n{YELLOW}這次沒有產生新的錄製檔（可能連線失敗或中途取消），略過歸檔。{RESET}")
         return
@@ -320,15 +337,15 @@ def do_experiment():
     dest = os.path.join(folder, f"{archive_stem}.csv")
     shutil.copy2(features_path, dest)
 
-    # 原始 EEG 也用同一個實驗檔名保存一份：看到 Model/boring/boring_S1.csv，
-    # 就知道對應的原始資料是 Data/boring_S1_Original.csv，不必回頭查錄製編號。
+    # 原始 EEG 改名保存：看到 Model/boring/boring_S1.csv，就知道對應的原始資料是
+    # Data/boring_S1_Original.csv，不必回頭查錄製編號。用搬移，Data/ 不留流水號那份。
     # 選單 [8] 清 CSV 時，*_Original.csv 與 Model/ 的歸檔一樣預設受保護。
     original_dest = original_dest_path(archive_stem)
     try:
-        shutil.copy2(os.path.join(CSV_DIR, f"{stem}.csv"), original_dest)
+        shutil.move(os.path.join(CSV_DIR, f"{stem}.csv"), original_dest)
     except OSError as exc:
-        # 原始檔沒存成不影響已歸檔好的 Features，提醒流水號那份還在就好。
-        print(f"\n{YELLOW}原始資料另存失敗：{exc}{RESET}")
+        # 搬移失敗不影響已歸檔好的 Features，提醒原檔還在原地就好。
+        print(f"\n{YELLOW}原始資料改名失敗：{exc}{RESET}")
         print(f"{DIM}Features 已歸檔，原始錄製仍在 Data/{stem}.csv。{RESET}")
         original_dest = None
 
@@ -337,7 +354,8 @@ def do_experiment():
     if original_dest:
         rel_original = os.path.relpath(original_dest, BASE_DIR).replace(os.sep, "/")
         print(f"{GREEN}原始資料已保存至 {rel_original}{RESET}")
-    print(f"{DIM}錄製流水號：Data/{stem}.csv　中繼結果：Features/{stem}.csv（皆保留）{RESET}")
+        print(f"{DIM}（Data/{stem}.csv 已改名搬走，不再保留流水號那份）{RESET}")
+    print(f"{DIM}中繼結果：Features/{stem}.csv（保留）{RESET}")
 
 
 def do_clean():
@@ -397,12 +415,13 @@ def view_feature_metric(metric):
     EI 與 FAA 不再各自輸出到 EI/ 與 FAA/，兩者都併在 Features/<編號>.csv 裡，
     所以這裡統一從 Features/ 讀。
     """
-    files = [f for f in os.listdir(FEATURES_DIR) if re.match(r"^\d+\.csv$", f)] \
+    files = [f for f in os.listdir(FEATURES_DIR) if f.endswith(".csv")] \
         if os.path.isdir(FEATURES_DIR) else []
     if not files:
         print(f"{YELLOW}Features/ 內沒有結果。先跑選單 [6] 對某個錄製檔算 EI + FAA。{RESET}")
         return
-    files.sort(key=lambda x: int(x[:-4]))
+    # [6] 對 _Original 檔算出來的結果檔名也不是純數字，一併列出
+    files.sort(key=name_order)
     print(f"{BOLD}Features/ 內的結果：{RESET} " + ", ".join(files))
     stem = ask(f"看哪個編號？（Enter = 最新 {files[-1][:-4]}）：", default=files[-1][:-4])
     path = os.path.join(FEATURES_DIR, f"{stem}.csv")

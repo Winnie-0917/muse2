@@ -10,8 +10,8 @@
 
 預設**不會**碰
 --------------
-  - Data/*_Original.csv  控制台 [5] 實驗保存的原始 EEG。它與 Model/ 的歸檔成對，
-                     是那次實驗唯一的原始資料，刪掉只能重做實驗，所以預設保護。
+  - Data/*_Original.csv  控制台 [5] 實驗保存的原始 EEG。實驗跑完流水號那份已被搬走，
+                     這是該段錄製唯一的原始資料，刪掉只能重做實驗，所以預設保護。
   - Model/**/*.csv   boring / interesting 的訓練資料。這是人工標註整理過的，
                      不是分析產物，重跑任何步驟都生不回來，所以預設保護。
                      控制台 [5] 歸檔的 PDF_Experiment/ 與 Learn8_Experiment/ 也在 Model/
@@ -42,6 +42,7 @@ import shutil
 import sys
 
 from signal_monitor.analysis.features import build_features_csv
+from signal_monitor.data_utils.record_csv import ORIGINAL_RE
 from signal_monitor.paths import PROJECT_ROOT
 
 BASE_DIR = PROJECT_ROOT
@@ -49,10 +50,9 @@ BASE_DIR = PROJECT_ROOT
 EXCLUDE_DIRS = {"venv", ".venv", "env", ".git", "__pycache__", ".idea", ".vscode"}
 
 RECORDINGS_DIR = "Data"    # 原始 EEG 錄製
-# 控制台 [5] 實驗歸檔時另存的原始 EEG：Data/<實驗檔名>_Original.csv
-#（撞名時會是 _Original_2.csv、_Original_3.csv）。與 Model/ 的歸檔成對，
-# 跟著訓練資料一起受 --include-model 管轄，不會被一般的清 CSV 掃掉。
-ORIGINAL_RE = re.compile(r"_Original(_\d+)?\.csv$", re.IGNORECASE)
+# ORIGINAL_RE 認的是控制台 [5] 實驗改名保存的原始 EEG：Data/<實驗檔名>_Original.csv。
+# 實驗跑完流水號那份就被搬走了，這是該段錄製唯一的原始資料，所以與 Model/ 的歸檔
+# 一起受 --include-model 管轄，不會被一般的清 CSV 掃掉。命名規則定義在 record_csv。
 # 預設保護：訓練資料是人工標註整理過的，不是分析產物，重跑任何步驟都生不回來。
 # boring / interesting 訓練資料，以及控制台 [5] 歸檔的 PDF_Experiment/、
 # Learn8_Experiment/。整個 Model/ 一起保護，新增實驗分類時不用再改這裡。
