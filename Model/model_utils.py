@@ -62,8 +62,16 @@ class Session:
 
 
 def subject_from_filename(path: Path) -> int:
-    """檔名數字即受測者編號：boring/2.csv 與 interesting/2.csv 都是 S2。"""
-    match = re.search(r"(\d+)", path.stem)
+    """檔名數字即受測者編號：boring/2.csv 與 interesting/2.csv 都是 S2。
+
+    先認新命名結尾的 _S<編號>，認不出來才退回「檔名裡第一個數字」，
+    讓舊的 boring/1.csv 與新的 boring_S1.csv 都算 S1。
+
+    順序不能反過來：Learn8_S1 用「第一個數字」會抓到 Learn8 的 8，
+    而且 Learn8_S1 與 Learn8_S2 會一起被當成 S8 撞在一起。
+    這條規則要跟 cli.py 的 next_subject_index() 保持一致。
+    """
+    match = re.search(r"_S(\d+)$", path.stem, re.IGNORECASE) or re.search(r"(\d+)", path.stem)
     if not match:
         raise ValueError(f"檔名不含受測者編號，無法分組：{path}")
     return int(match.group(1))

@@ -79,8 +79,10 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
 | Learn8 實驗 | `Model/Learn8_Experiment/` | `Learn8_S<i>.csv` | `Data/Learn8_S<i>_Original.csv` |
 
 - `<i>` 是受測者編號，每個資料夾各自依序遞增。編號取法跟 `Model/model_utils.py`
-  一致——**檔名裡第一個數字就是受測者編號**，所以舊的 `1.csv` 與新的 `boring_S1.csv`
-  都算 S1，接續編號時不會撞在一起。
+  一致——**先認檔名結尾的 `_S<編號>`，認不出來才退回「檔名裡第一個數字」**，
+  所以舊的 `1.csv` 與新的 `boring_S1.csv` 都算 S1，接續編號時不會撞在一起。
+  順序不能反過來：`Learn8_S1` 用「第一個數字」會抓到 `Learn8` 的 8，
+  而且 `Learn8_S1` 與 `Learn8_S2` 會一起被當成 S8。
 - `_Original.csv` 一樣算錄製檔：選單 [6]（重算 Features）與 [7]（訊號摘要 / FFT）
   都列得出來，所以流水號那份被搬走之後，原始資料照樣選得到、算得回來。
 - **`Features/<編號>.csv` 仍是流水號**，而且會被重複使用。流水號是看 `Data/` 現有的
