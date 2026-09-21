@@ -10,11 +10,11 @@
 
 預設**不會**碰
 --------------
-  - Data/*_Original.csv  控制台 [5] 實驗保存的原始 EEG。實驗跑完流水號那份已被搬走，
+  - Data/*_Original.csv  控制台 [4] 實驗保存的原始 EEG。實驗跑完流水號那份已被搬走，
                      這是該段錄製唯一的原始資料，刪掉只能重做實驗，所以預設保護。
   - Model/**/*.csv   boring / interesting 的訓練資料。這是人工標註整理過的，
                      不是分析產物，重跑任何步驟都生不回來，所以預設保護。
-                     控制台 [5] 歸檔的 PDF_Experiment/ 與 Learn8_Experiment/ 也在 Model/
+                     控制台 [4] 歸檔的 PDF_Experiment/ 與 Learn8_Experiment/ 也在 Model/
                      底下，同樣只能重做實驗才有，一併受保護。
                      要一起刪：--include-model（或 --all）
 
@@ -50,11 +50,11 @@ BASE_DIR = PROJECT_ROOT
 EXCLUDE_DIRS = {"venv", ".venv", "env", ".git", "__pycache__", ".idea", ".vscode"}
 
 RECORDINGS_DIR = "Data"    # 原始 EEG 錄製
-# ORIGINAL_RE 認的是控制台 [5] 實驗改名保存的原始 EEG：Data/<實驗檔名>_Original.csv。
+# ORIGINAL_RE 認的是控制台 [4] 實驗改名保存的原始 EEG：Data/<實驗檔名>_Original.csv。
 # 實驗跑完流水號那份就被搬走了，這是該段錄製唯一的原始資料，所以與 Model/ 的歸檔
 # 一起受 --include-model 管轄，不會被一般的清 CSV 掃掉。命名規則定義在 record_csv。
 # 預設保護：訓練資料是人工標註整理過的，不是分析產物，重跑任何步驟都生不回來。
-# boring / interesting 訓練資料，以及控制台 [5] 歸檔的 PDF_Experiment/、
+# boring / interesting 訓練資料，以及控制台 [4] 歸檔的 PDF_Experiment/、
 # Learn8_Experiment/。整個 Model/ 一起保護，新增實驗分類時不用再改這裡。
 MODEL_DIR = "Model"
 
