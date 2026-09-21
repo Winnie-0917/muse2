@@ -49,10 +49,10 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
 擷取 / 監控
   [1] 掃描並選擇 MUSE 裝置
   [2] 即時監控原始 EEG
-  [3] 錄製資料到 Data/
-  [4] 一鍵流程：監控+錄製 → FFT → Features   (★推薦)
-  [5] 實驗：選實驗類型 → 一鍵流程 → Features + 原始資料自動歸檔
+  [3] 一鍵流程：監控+錄製 → FFT → Features   (★推薦)
+  [4] 實驗：選實驗類型 → 一鍵流程 → Features + 原始資料自動歸檔
 分析
+  [5] 模型預測：選受測者比較 PDF 與 Learn8
   [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 查看 / 管理
   [7] 查看數據（訊號摘要 / EI / FAA / FFT；每秒 FFT 明細在子選單 [5]）
@@ -61,7 +61,7 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
   [0] 離開
 ```
 
-### 選單 [5] 實驗
+### 選單 [4] 實驗
 
 選一種實驗後跑的就是一鍵流程（錄製 → FFT → Features），只是最後多兩步：
 
@@ -98,6 +98,30 @@ python -m signal_monitor      # 或安裝後直接執行 signal-monitor
 - `Data/*.csv` 會一起上傳到 GitHub（含 `_Original.csv`），實驗的原始資料與歸檔都留在版控裡。
   原始錄製每分鐘約 0.8 MB，repo 會隨實驗次數持續變大，留意一下容量。
 
+### 選單 [5] 模型預測
+
+掃 `Model/PDF_Experiment/` 與 `Model/Learn8_Experiment/`，列出每位受測者兩種情境的檔案，
+選一位（或 `a` 全部逐一跑）後呼叫 `Model/predict_model.py`，輸出兩段的 P(有趣) 與比較結果：
+
+```
+  受測者   PDF 閱讀          Learn8 學習
+  S1       PDF_S1.csv        Learn8_S1.csv
+  S2       PDF_S2.csv        Learn8_S2.csv
+ !S3       PDF_S3.csv        （缺）
+
+請輸入受測者編號（a = 全部逐一比較，Enter 取消）：
+```
+
+- 只有**同時**有 PDF 與 Learn8 兩段的受測者才能比較；少一邊的會標 `!` 並排除。
+- 一律加 `--baseline auto`，**以該受測者自己的兩段錄製當基準線**算 Z-score，抵銷個體差異。
+- 選 `a` 時是「每人各跑一次」而不是把所有人一次丟進去——
+  `--baseline auto` 會把列出的檔案合併起來估 μ/σ，混進別人的資料就不再是個人基準線了。
+- 找不到 `Model/trained_model.joblib` 時會問要不要當場用 `boring/` 與 `interesting/` 訓練一個。
+
+> **錄製功能去哪了？** 原本的 `[3] 錄製資料到 Data/` 已由本選項取代。
+> 純錄製（不接 FFT / Features）仍可直接跑
+> `python -m signal_monitor.data_utils.record_csv`；
+> 平常要的話用 `[3]` 一鍵流程就好，它本來就包含錄製。
 
 畫面範例：
 
@@ -328,8 +352,8 @@ muse2/
 ├── pyproject.toml            # 專案設定與相依套件（取代 requirements.txt）
 ├── README.md
 ├── Data/                     # 原始 EEG 錄製（.csv 會上傳到版控）
-│   ├── <編號>.csv                      # [3] / [4] 的錄製（流水號）
-│   └── <實驗檔名>_Original.csv         # [5] 實驗改名保存的原始資料
+│   ├── <編號>.csv                      # [3] 一鍵流程的錄製（流水號）
+│   └── <實驗檔名>_Original.csv         # [4] 實驗改名保存的原始資料
 ├── Features/                 # EI / FAA / 眨眼 合併輸出，也是模型的輸入
 ├── Model/                    # 無聊/有趣 分類模型＋實驗歸檔
 │   ├── boring/boring_S<i>.csv          # 受測者 i 的絕對無聊任務（y=0）
@@ -363,7 +387,7 @@ muse2/
 | `signal_monitor.overall_process` | 一鍵：即時監控+錄製 → FFT → EI → FAA（單一指令跑完整流程）|
 | `signal_monitor.hardware.list_devices` | 掃描附近 MUSE 裝置、取得 BLE address |
 | `signal_monitor.hardware.monitor_raw`  | 直接 BLE 連線 + 即時監控原始 EEG |
-| `signal_monitor.data_utils.record_csv` | 直接 BLE 連線、把原始 EEG 錄成 CSV |
+| `signal_monitor.data_utils.record_csv` | 直接 BLE 連線、把原始 EEG 錄成 CSV（控制台已改由 [3] 一鍵流程呼叫，需要純錄製時自行執行）|
 | `signal_monitor.analysis.fft_energy`   | 每秒 FFT，算 1..128 Hz 各頻率能量（只顯示摘要；加 `--out <dir>` 才存檔）|
 | `signal_monitor.analysis.engagement`   | 每秒算 NASA 專注度指數（EI）+ 10 秒滑動平均 |
 | `signal_monitor.analysis.faa`          | 每秒算前額 alpha 不對稱 FAA + 10 秒滑動平均 |

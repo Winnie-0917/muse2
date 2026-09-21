@@ -2,13 +2,14 @@
 """
 MUSE 2 EEG 互動式控制台（終端機選單）。
 
-把整個流程整合到一個介面：掃描裝置、即時監控、錄製、一鍵流程（監控+錄製→FFT→EI）、
-單獨做 FFT（只顯示）/ EI+FAA+眨眼（只輸出 Features/），以及「查看數據」（列出錄製檔、訊號摘要、
-EI / FAA 結果、FFT 主頻）與清除資料。
+把整個流程整合到一個介面：掃描裝置、即時監控、一鍵流程（監控+錄製→FFT→EI）、
+實驗歸檔、模型預測（比較 PDF 與 Learn8）、單獨做 FFT（只顯示）/ EI+FAA+眨眼
+（只輸出 Features/），以及「查看數據」（列出錄製檔、訊號摘要、EI / FAA 結果、
+FFT 主頻）與清除資料。
 
 擷取/監控類功能會以子程序呼叫既有模組（python -m signal_monitor.hardware.monitor_raw /
-…record_csv / …overall_process …），這樣即時畫面能正常顯示；查看數據則直接讀
-Data/ 與 Features/ 內的 CSV 算給你看。
+…overall_process …），這樣即時畫面能正常顯示；模型預測則呼叫 Model/predict_model.py；
+查看數據直接讀 Data/ 與 Features/ 內的 CSV 算給你看。
 
 用法:
     python -m signal_monitor
@@ -18,6 +19,7 @@ import re
 import shutil
 import subprocess
 import traceback
+import unicodedata
 import sys
 
 import numpy as np
@@ -55,6 +57,19 @@ def pause():
         pass
 
 
+def disp_width(text):
+    """終端機顯示寬度：全形字（CJK）佔兩欄。
+
+    f"{s:<18}" 是按「字數」補的，中文欄位會短一截而對不齊，所以自己算。
+    """
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
+def pad(text, width):
+    """靠左補空白到指定顯示寬度；ANSI 色碼請在外面再包，別混進來算寬度。"""
+    return text + " " * max(0, width - disp_width(text))
+
+
 def ask(prompt, default=None):
     try:
         s = input(prompt).strip()
@@ -63,9 +78,8 @@ def ask(prompt, default=None):
     return s if s else default
 
 
-def run_module(module, *args):
-    """以子程序執行套件內模組（python -m ...），繼承終端機（即時 UI 正常）。"""
-    cmd = [PY, "-m", module, *[a for a in args if a is not None]]
+def run_cmd(cmd, label):
+    """跑一個子程序並繼承終端機（即時 UI 正常）；label 只用在錯誤訊息上。"""
     print(f"{DIM}$ {' '.join(cmd)}{RESET}\n")
     try:
         result = subprocess.run(cmd)
@@ -73,9 +87,25 @@ def run_module(module, *args):
         print(f"\n{YELLOW}已中斷，返回選單。{RESET}")
         return None
     if result.returncode != 0:
-        print(f"\n{YELLOW}{module} 以非零狀態結束（{result.returncode}），"
+        print(f"\n{YELLOW}{label} 以非零狀態結束（{result.returncode}），"
               f"後續步驟的結果可能不完整。{RESET}")
     return result.returncode
+
+
+def run_module(module, *args):
+    """以子程序執行套件內模組（python -m ...）。"""
+    return run_cmd([PY, "-m", module, *[a for a in args if a is not None]], module)
+
+
+def run_script(path, *args):
+    """以子程序執行獨立腳本。
+
+    Model/ 下的訓練與預測腳本不在 signal_monitor 套件裡，不能用 python -m 跑；
+    直接給路徑則 Python 會把腳本所在的 Model/ 放進 sys.path，
+    predict_model.py 的 `import model_utils` 才找得到。
+    """
+    return run_cmd([PY, path, *[a for a in args if a is not None]],
+                   os.path.basename(path))
 
 
 def sort_features_csv_by_second(path):
@@ -126,8 +156,8 @@ def name_order(name):
 def list_recordings():
     """回傳 Data/ 內的錄製檔，流水號在前、實驗保存的 _Original 在後。
 
-    Data/ 有兩種錄製檔：<編號>.csv 是 [3] / [4] 產生的流水號，
-    <實驗檔名>_Original.csv 則是 [5] 實驗把原始 EEG 改名保存的那份。
+    Data/ 有兩種錄製檔：<編號>.csv 是 [3] 一鍵流程產生的流水號，
+    <實驗檔名>_Original.csv 則是 [4] 實驗把原始 EEG 改名保存的那份。
     兩種都是可以重算的原始 EEG，所以 [6] / [7] 都要看得到——
     實驗跑完 Data/ 只剩 _Original 那份，漏掉就等於找不到原始資料了。
     """
@@ -191,11 +221,6 @@ def do_monitor():
     run_module("signal_monitor.hardware.monitor_raw", *device_args())
 
 
-def do_record():
-    secs = ask("要錄幾秒？（Enter = 一直錄到 Ctrl+C）：", default="0")
-    run_module("signal_monitor.data_utils.record_csv", *device_args(), "--seconds", secs)
-
-
 def do_pipeline():
     secs = ask("一鍵流程要錄幾秒？（建議 ≥10；Enter = 錄到 Ctrl+C）：", default="0")
     run_module("signal_monitor.overall_process", *device_args(), "--seconds", secs)
@@ -240,6 +265,41 @@ EXPERIMENTS = {
     "3": ("PDF 實驗",    os.path.join(BASE_DIR, "Model", "PDF_Experiment"),    "PDF_S"),
     "4": ("Learn8 實驗", os.path.join(BASE_DIR, "Model", "Learn8_Experiment"), "Learn8_S"),
 }
+
+# ---------- 模型預測 ----------
+MODEL_DIR = os.path.join(BASE_DIR, "Model")
+MODEL_FILE = os.path.join(MODEL_DIR, "trained_model.joblib")
+PREDICT_SCRIPT = os.path.join(MODEL_DIR, "predict_model.py")
+TRAIN_SCRIPT = os.path.join(MODEL_DIR, "train_model.py")
+
+# 選單 [5] 要拿來對比的兩種情境。沿用 EXPERIMENTS 裡 PDF / Learn8 那兩項的資料夾，
+# 改動實驗歸檔位置時兩邊會一起跟著走。
+COMPARE_SETS = (("PDF 閱讀", EXPERIMENTS["3"][1]), ("Learn8 學習", EXPERIMENTS["4"][1]))
+
+
+def subject_index(stem):
+    """檔名 -> 受測者編號；規則與 next_subject_index() / model_utils 一致。
+
+    先認結尾的 _S<編號>，認不出來才退回「檔名裡第一個數字」——順序不能反過來，
+    Learn8_S1 用「第一個數字」會抓到 Learn8 的 8。
+    """
+    m = re.search(r"_S(\d+)$", stem, re.IGNORECASE) or re.search(r"(\d+)", stem)
+    return int(m.group(1)) if m else None
+
+
+def collect_compare_subjects():
+    """掃 PDF / Learn8 兩個資料夾，回傳 {受測者編號: {情境名: 檔案路徑}}。"""
+    found = {}
+    for label, folder in COMPARE_SETS:
+        if not os.path.isdir(folder):
+            continue
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".csv"):
+                continue
+            index = subject_index(name[:-4])
+            if index is not None:
+                found.setdefault(index, {})[label] = os.path.join(folder, name)
+    return found
 
 
 def next_subject_index(folder):
@@ -356,6 +416,82 @@ def do_experiment():
         print(f"{GREEN}原始資料已保存至 {rel_original}{RESET}")
         print(f"{DIM}（Data/{stem}.csv 已改名搬走，不再保留流水號那份）{RESET}")
     print(f"{DIM}中繼結果：Features/{stem}.csv（保留）{RESET}")
+
+
+def do_predict():
+    """選一位受測者，用訓練好的模型比較他的 PDF 與 Learn8 兩段錄製。
+
+    每位受測者各跑一次 predict_model.py，而不是把所有人一次丟進去：
+    --baseline auto 會把列出的檔案合併起來估 mu/sigma，混進別人的資料
+    就不再是「這個人自己的基準線」，個體差異也就抵銷不掉了。
+    """
+    print(f"{BOLD}{CYAN}== 模型預測：PDF 閱讀 vs Learn8 學習 =={RESET}\n")
+
+    if not os.path.exists(MODEL_FILE):
+        print(f"{RED}找不到模型檔：Model/trained_model.joblib{RESET}")
+        if (ask(f"{DIM}要現在用 Model/boring 與 Model/interesting 訓練一個嗎？(y/N)："
+                f"{RESET}", default="n") or "n").lower() not in ("y", "yes"):
+            print(f"{YELLOW}已取消。可自行執行：python Model/train_model.py{RESET}")
+            return
+        print()
+        run_script(TRAIN_SCRIPT)
+        if not os.path.exists(MODEL_FILE):
+            print(f"\n{RED}訓練沒有產生模型檔，無法預測。{RESET}")
+            return
+        print()
+
+    subjects = collect_compare_subjects()
+    if not subjects:
+        print(f"{YELLOW}Model/PDF_Experiment/ 與 Model/Learn8_Experiment/ 都沒有資料。{RESET}")
+        print(f"{DIM}先用選單 [4] 實驗各錄一段 PDF 與 Learn8。{RESET}")
+        return
+
+    labels = [label for label, _folder in COMPARE_SETS]
+    print(f"{DIM}用 Model/trained_model.joblib 算每秒的 P(有趣)，再取整段平均。"
+          f"每位受測者以自己的兩段錄製當基準線，抵銷個體差異。{RESET}\n")
+    col = 20
+    print("  " + pad("受測者", 9) + "".join(pad(label, col) for label in labels))
+    ready = []
+    for index in sorted(subjects):
+        have = subjects[index]
+        cells = []
+        for label in labels:
+            path = have.get(label)
+            cells.append(pad(os.path.basename(path), col) if path
+                         else f"{YELLOW}{pad('（缺）', col)}{RESET}")
+        complete = len(have) == len(labels)
+        if complete:
+            ready.append(index)
+        mark = " " if complete else f"{YELLOW}!{RESET}"
+        print(f" {mark}" + pad(f"S{index}", 9) + "".join(cells))
+
+    if not ready:
+        print(f"\n{YELLOW}沒有任何受測者同時有 PDF 與 Learn8 兩段，無法比較。{RESET}")
+        return
+    if len(ready) < len(subjects):
+        print(f"\n{DIM}標 ! 的受測者少了一邊，不列入比較。{RESET}")
+
+    sel = ask("\n請輸入受測者編號（a = 全部逐一比較，Enter 取消）：")
+    if not sel:
+        print(f"{YELLOW}已取消。{RESET}")
+        return
+    if sel.lower() in ("a", "all"):
+        chosen = ready
+    else:
+        digits = sel.lstrip("Ss")
+        if not digits.isdigit() or int(digits) not in subjects:
+            print(f"{RED}無效選擇：{sel}{RESET}")
+            return
+        if int(digits) not in ready:
+            missing = [label for label in labels if label not in subjects[int(digits)]]
+            print(f"{YELLOW}S{digits} 少了 {' 與 '.join(missing)}，無法比較。{RESET}")
+            return
+        chosen = [int(digits)]
+
+    for index in chosen:
+        print(f"\n{BOLD}{CYAN}---- 受測者 S{index} ----{RESET}")
+        paths = [subjects[index][label] for label in labels]
+        run_script(PREDICT_SCRIPT, *paths, "--baseline", "auto")
 
 
 def do_clean():
@@ -580,11 +716,11 @@ MENU = f"""{BOLD}{CYAN}============================================
  {BOLD}擷取 / 監控{RESET}
    [1] 掃描並選擇 MUSE 裝置
    [2] 即時監控原始 EEG
-   [3] 錄製資料到 Data/
-   [4] 一鍵流程：監控+錄製 → FFT → Features  {DIM}(★推薦){RESET}
-   [5] 實驗：選實驗類型 → 一鍵流程 → Features + 原始資料自動歸檔
+   [3] 一鍵流程：監控+錄製 → FFT → Features  {DIM}(★推薦){RESET}
+   [4] 實驗：選實驗類型 → 一鍵流程 → Features + 原始資料自動歸檔
 
  {BOLD}分析{RESET}
+   [5] 模型預測：選受測者比較 PDF 與 Learn8
    [6] 對錄製檔算 EI + FAA + 眨眼（只輸出 Features/）
 
  {BOLD}查看 / 管理{RESET}
@@ -597,8 +733,8 @@ MENU = f"""{BOLD}{CYAN}============================================
 
 def main():
     actions = {
-        "1": do_scan, "2": do_monitor, "3": do_record, "4": do_pipeline,
-        "5": do_experiment, "6": do_ei, "7": do_view_data, "8": do_clean, "9": do_cat,
+        "1": do_scan, "2": do_monitor, "3": do_pipeline, "4": do_experiment,
+        "5": do_predict, "6": do_ei, "7": do_view_data, "8": do_clean, "9": do_cat,
     }
     while True:
         clear()

@@ -25,7 +25,7 @@ from signal_monitor.paths import PROJECT_ROOT
 # 預設把錄製檔存到專案下的 Data/ 資料夾
 CSV_DIR = os.path.join(PROJECT_ROOT, "Data")
 
-# Data/ 內的第二種錄製檔：控制台 [5] 實驗把原始 EEG 改名保存成
+# Data/ 內的第二種錄製檔：控制台 [4] 實驗把原始 EEG 改名保存成
 # <實驗檔名>_Original.csv（撞名時 _Original_2.csv、_Original_3.csv）。
 # 命名規則集中在這裡，cli 與 clean_csv 都從這裡取用，不各寫一份。
 ORIGINAL_SUFFIX = "_Original"
